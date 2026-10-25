@@ -378,9 +378,16 @@ fn ec_bits2int(c: const Curve&, h: const u8[:]) -> u32[..17] {
 // bytes. The nonce comes from HMAC-DRBG over the key and the hash (RFC
 // 6979 §3.2), so signing needs no randomness and repeats exactly.
 fn ecdsa_sign(c: const Curve&, sk: const u8[:], msg: const u8[:]) -> u8[>..] {
+    let h = hash_bits(c.hash, msg);
+    return ecdsa_sign_digest(c, sk, h, c.hash);
+}
+
+// ECDSA over a digest made by the hash `hash_id` (a bignum.hmac id), which
+// RFC 6979's HMAC-DRBG then uses too.
+fn ecdsa_sign_digest(c: const Curve&, sk: const u8[:], h: const u8[:], hash_id: i64) -> u8[>..] {
     let d, okd = ec_scalar(c, sk);
     assert(okd);
-    let h = hash_bits(c.hash, msg);
+    assert(h.len == hash_len(hash_id));
     let e = nreduce(c, ec_bits2int(c, h)[..]);
     let hl = h.len;
     var h1: u8[>..] = [];
@@ -397,9 +404,9 @@ fn ecdsa_sign(c: const Curve&, sk: const u8[:], msg: const u8[:]) -> u8[>..] {
         m.push(round as! u8);
         m.append(sk);
         m.append(h1);
-        let nk = hmac(c.hash, k, m);
+        let nk = hmac(hash_id, k, m);
         k = copy(nk);
-        let nv = hmac(c.hash, k, v);
+        let nv = hmac(hash_id, k, v);
         v = copy(nv);
     }
     let g = ec_generator(c);
@@ -407,7 +414,7 @@ fn ecdsa_sign(c: const Curve&, sk: const u8[:], msg: const u8[:]) -> u8[>..] {
         // T: HMAC blocks until there are as many bits as the order has.
         var tt: u8[>..] = [];
         while tt.len < c.len {
-            let nv = hmac(c.hash, k, v);
+            let nv = hmac(hash_id, k, v);
             v = copy(nv);
             tt.append(v);
         }
@@ -431,9 +438,9 @@ fn ecdsa_sign(c: const Curve&, sk: const u8[:], msg: const u8[:]) -> u8[>..] {
         m.clear();
         m.append(v);
         m.push(0);
-        let nk = hmac(c.hash, k, m);
+        let nk = hmac(hash_id, k, m);
         k = copy(nk);
-        let nv = hmac(c.hash, k, v);
+        let nv = hmac(hash_id, k, v);
         v = copy(nv);
     }
 }
