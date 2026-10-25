@@ -3,8 +3,8 @@
 // and decryption at each key size, and CTR mode, including counters that
 // carry across words and wrap the whole block.
 import std;
-import bigman from "..";
-import bigman.aes;
+import bignum from "..";
+import bignum.aes;
 
 var failures = 0;
 var checks = 0;
@@ -34,7 +34,7 @@ fn sbox32(xs: const u8[:], inverse: bool) -> u8[32] {
         let x: u32 = xs[i];
         for j in 8 { q[j] = q[j] | ((x >> j) & 1) << i; }
     }
-    if inverse { bigman::aes_inv_sbox(q); } else { bigman::aes_sbox(q); }
+    if inverse { bignum::aes_inv_sbox(q); } else { bignum::aes_sbox(q); }
     var out: u8[32] = [0; 32];
     for i in 32 {
         for j in 8 { out[i] = out[i] | (((q[j] >> i) & 1) << j) as! u8; }
@@ -57,20 +57,20 @@ fn main() {
                 for i in 32 { check("inv sbox", back[i] == xs[i]); }
             }
         } else if w[0] == "block" {
-            let k = bigman::aes_init(unhex(w[1]));
+            let k = bignum::aes_init(unhex(w[1]));
             let pt = unhex(w[2]);
             let ct = unhex(w[3]);
-            check(line, bigman::aes_encrypt_block(k, pt) == ct);
-            check(line, bigman::aes_decrypt_block(k, ct) == pt);
+            check(line, bignum::aes_encrypt_block(k, pt) == ct);
+            check(line, bignum::aes_decrypt_block(k, ct) == pt);
         } else if w[0] == "ctr" {
-            let k = bigman::aes_init(unhex(w[1]));
+            let k = bignum::aes_init(unhex(w[1]));
             let iv = unhex(w[2]);
             let pt = unhex(w[3]);
             let want = unhex(w[4]);
             var data = copy(pt);
-            bigman::aes_ctr(k, iv, data);
+            bignum::aes_ctr(k, iv, data);
             check(line, data == want);
-            bigman::aes_ctr(k, iv, data);
+            bignum::aes_ctr(k, iv, data);
             check(line, data == pt);
             // Streamed in whole blocks: the counter carries over between calls.
             var cb: u8[16] = [0; 16];
@@ -80,7 +80,7 @@ fn main() {
             var blocks = 1;
             while off < parts.len {
                 let end = ::min(parts.len, off + 16 * blocks);
-                bigman::aes_ctr_xor(k, cb, parts[off..end], false);
+                bignum::aes_ctr_xor(k, cb, parts[off..end], false);
                 off = end;
                 blocks++;
             }

@@ -4,8 +4,8 @@
 // opened again after flipping a bit of the tag, the ciphertext, the AAD or
 // the nonce, which must fail and leave nothing behind.
 import std;
-import bigman from "..";
-import bigman.gcm;
+import bignum from "..";
+import bignum.gcm;
 
 var failures = 0;
 var checks = 0;
@@ -40,45 +40,45 @@ fn main() {
         let tag = unhex(w[6]);
         var want = copy(ct);
         want.append(tag);
-        let sealed = bigman::aes_gcm_seal(key, nonce, aad, pt);
+        let sealed = bignum::aes_gcm_seal(key, nonce, aad, pt);
         check(line, sealed == want);
-        let opened, ok = bigman::aes_gcm_open(key, nonce, aad, sealed);
+        let opened, ok = bignum::aes_gcm_open(key, nonce, aad, sealed);
         check(line, ok && opened == pt);
 
         // The in-place form with a reused context.
-        let g = bigman::gcm_init(key);
+        let g = bignum::gcm_init(key);
         var data = copy(pt);
-        let t = bigman::gcm_encrypt(g, nonce, aad, data);
+        let t = bignum::gcm_encrypt(g, nonce, aad, data);
         check(line, data == ct && t == tag);
-        check(line, bigman::gcm_decrypt(g, nonce, aad, data, t) && data == pt);
+        check(line, bignum::gcm_decrypt(g, nonce, aad, data, t) && data == pt);
 
         // Tampering anywhere fails, and the plaintext is not released.
         var bad_tag = copy(sealed);
         bad_tag[bad_tag.len - 1] ^= 1;
-        let o1, ok1 = bigman::aes_gcm_open(key, nonce, aad, bad_tag);
+        let o1, ok1 = bignum::aes_gcm_open(key, nonce, aad, bad_tag);
         check("tag", !ok1 && o1.len == 0);
         if ct.len > 0 {
             var bad_ct = copy(sealed);
             bad_ct[0] ^= 0x80;
-            let o2, ok2 = bigman::aes_gcm_open(key, nonce, aad, bad_ct);
+            let o2, ok2 = bignum::aes_gcm_open(key, nonce, aad, bad_ct);
             check("ciphertext", !ok2 && o2.len == 0);
             var buf = copy(ct);
-            check("in place", !bigman::gcm_decrypt(g, nonce, aad, buf, bad_tag[ct.len..]));
+            check("in place", !bignum::gcm_decrypt(g, nonce, aad, buf, bad_tag[ct.len..]));
             var zeroed = true;
             for x in buf { if x != 0 { zeroed = false; } }
             check("zeroed", zeroed);
         }
         var bad_aad = copy(aad);
         bad_aad.push(0);
-        let o3, ok3 = bigman::aes_gcm_open(key, nonce, bad_aad, sealed);
+        let o3, ok3 = bignum::aes_gcm_open(key, nonce, bad_aad, sealed);
         check("aad", !ok3);
         var bad_nonce = copy(nonce);
         bad_nonce[0] ^= 1;
-        let o4, ok4 = bigman::aes_gcm_open(key, bad_nonce, aad, sealed);
+        let o4, ok4 = bignum::aes_gcm_open(key, bad_nonce, aad, sealed);
         check("nonce", !ok4);
     }
     let short: u8[15] = [0; 15];
-    let o5, ok5 = bigman::aes_gcm_open(short, short[..12], "", short);
+    let o5, ok5 = bignum::aes_gcm_open(short, short[..12], "", short);
     check("short", !ok5);
     print("gcm vectors: ", checks, " checks, ", failures, " failed");
     assert(failures == 0);

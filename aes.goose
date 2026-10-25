@@ -1,4 +1,4 @@
-// bigman.aes: AES-128/192/256 (FIPS 197) and CTR mode, constant time.
+// bignum.aes: AES-128/192/256 (FIPS 197) and CTR mode, constant time.
 //
 // Bitsliced, after BearSSL's aes_ct: no table lookups, so no cache timing.
 // Eight u32 words hold two blocks at once, bit j of every byte in word j
@@ -6,7 +6,7 @@
 // evaluated on all 32 bytes in parallel. ShiftRows and MixColumns become
 // shifts and rotations of the words.
 
-namespace bigman;
+namespace bignum;
 
 import std;
 

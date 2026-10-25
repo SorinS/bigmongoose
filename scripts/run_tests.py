@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run bigman's tests and examples.
+"""Run bignum's tests and examples.
 
 Every test/*.goose runs under the in-process JIT at -O0 and -O2 and with
 --debug (overflow, range and bounds checks); a test passes when it exits 0

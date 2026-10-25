@@ -1,20 +1,20 @@
-// bigman.ec: the NIST curves P-256 and P-384 (y^2 = x^3 - 3x + b over a
+// bignum.ec: the NIST curves P-256 and P-384 (y^2 = x^3 - 3x + b over a
 // prime field): ECDH key agreement, and ECDSA with SHA-256 on P-256 and
 // SHA-384 on P-384, its nonces derived deterministically (RFC 6979).
 //
 // One generic implementation serves both curves: field elements are
 // limbs of the curve's width (8 or 12) in Montgomery form, multiplied by
-// bigman.mont. Points are projective and added by the complete formulas of
+// bignum.mont. Points are projective and added by the complete formulas of
 // Renes, Costello and Batina (2016, algorithm 4 for a = -3), which have no
 // exceptional cases, so doubling is an addition and the point at infinity
 // needs no branch. Scalar multiplication takes 4-bit windows over the full
 // scalar width with a table read by scanning, so its time does not depend
 // on the scalar or the point.
 
-namespace bigman;
+namespace bignum;
 
 import std;
-import bigman;
+import bignum;
 import ct;
 import mont;
 import hmac;

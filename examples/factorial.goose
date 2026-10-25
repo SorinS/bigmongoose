@@ -5,14 +5,14 @@
 //   goose examples/factorial.goose -- 5000
 import std;
 import os;
-import bigman from "..";
+import bignum from "..";
 
 // The product of xs by binary splitting, so the multiplies are balanced
 // and the large ones go through Karatsuba. Bottom-up: neighbours pair
 // until one number is left. A BigInt cannot be an array element (it is
 // resizable), so a level is one limb array and where each number starts.
-fn product(xs: const u32[:]) -> bigman::BigInt {
-    var acc = bigman::zero();
+fn product(xs: const u32[:]) -> bignum::BigInt {
+    var acc = bignum::zero();
     var level: u32[>..] = [];
     var starts: i64[>..] = [];
     for x in xs { starts.push(level.len); level.push(x); }
@@ -27,7 +27,7 @@ fn product(xs: const u32[:]) -> bigman::BigInt {
             if i + 2 < starts.len {
                 let b = level[starts[i + 1]..starts[i + 2]];
                 var p: u32[>..] = [];
-                bigman::mag_mul(p, a, b);
+                bignum::mag_mul(p, a, b);
                 for limb in p { next.push(limb); }
             } else {
                 for limb in a { next.push(limb); }
@@ -39,8 +39,8 @@ fn product(xs: const u32[:]) -> bigman::BigInt {
         starts = copy(nstarts);
     }
     for limb in level { acc.mag.push(limb); }
-    bigman::mag_trim(acc.mag);
-    if acc.mag.len == 0 { acc = bigman::one(); }
+    bignum::mag_trim(acc.mag);
+    if acc.mag.len == 0 { acc = bignum::one(); }
     return acc;
 }
 
@@ -53,10 +53,10 @@ fn main() {
     }
     // The direct way: n multiply-by-small steps.
     var t0 = clock();
-    var f = bigman::one();
-    for i in 2..n + 1 { bigman::mul_add_small_to(f, i as u32, 0); }
+    var f = bignum::one();
+    for i in 2..n + 1 { bignum::mul_add_small_to(f, i as u32, 0); }
     let t_direct = clock() - t0;
-    let text = bigman::to_str(f);
+    let text = bignum::to_str(f);
     var digit_sum = 0;
     for c in text { digit_sum += c - '0'; }
     print(n, "! has ", text.len, " digits, digit sum ", digit_sum);
@@ -79,7 +79,7 @@ fn main() {
     }
     let g = product(factors);
     let t_split = clock() - t0;
-    print("  by prime powers and binary splitting: equal = ", bigman::eq(f, g));
+    print("  by prime powers and binary splitting: equal = ", bignum::eq(f, g));
     print("  direct ", (t_direct * 1000.0) as i64, " ms, split ", (t_split * 1000.0) as i64, " ms");
-    assert(bigman::eq(f, g));
+    assert(bignum::eq(f, g));
 }

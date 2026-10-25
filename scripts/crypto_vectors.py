@@ -1,4 +1,4 @@
-"""Reference implementations and vectors for bigman's hashes, aes, gcm, rsa,
+"""Reference implementations and vectors for bignum's hashes, aes, gcm, rsa,
 ec and ed25519.
 
 Straight transcriptions of the standards on Python integers and bytes, kept

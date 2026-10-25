@@ -3,8 +3,8 @@
 // each hash also fed in pieces; HMAC keys shorter and longer than a block;
 // HKDF from RFC 5869's first test case and random ones.
 import std;
-import bigman from "..";
-import bigman.hmac;
+import bignum from "..";
+import bignum.hmac;
 
 var failures = 0;
 var checks = 0;
@@ -41,25 +41,25 @@ fn main() {
             let m = unhex(w[1]);
             let want = unhex(w[2]);
             let is384 = w[0] == "sha384";
-            check(line, (if is384 { bigman::sha384(m) } else { bigman::sha512(m) }) == want);
-            var s = if is384 { bigman::sha384_init() } else { bigman::sha512_init() };
+            check(line, (if is384 { bignum::sha384(m) } else { bignum::sha512(m) }) == want);
+            var s = if is384 { bignum::sha384_init() } else { bignum::sha512_init() };
             var off = 0;
             var step = 1;
             while off < m.len {
                 let end = ::min(m.len, off + step);
-                bigman::sha512_update(s, m[off..end]);
+                bignum::sha512_update(s, m[off..end]);
                 off = end;
                 step += 3;
             }
-            check(line, bigman::sha512_final(s) == want);
+            check(line, bignum::sha512_final(s) == want);
         } else if w[0] == "hmac" {
-            check(line, bigman::hmac(num(w[1]), unhex(w[2]), unhex(w[3])) == unhex(w[4]));
+            check(line, bignum::hmac(num(w[1]), unhex(w[2]), unhex(w[3])) == unhex(w[4]));
         } else if w[0] == "hkdf" {
-            let got = bigman::hkdf(num(w[1]), unhex(w[2]), unhex(w[3]), unhex(w[4]), num(w[5]));
+            let got = bignum::hkdf(num(w[1]), unhex(w[2]), unhex(w[3]), unhex(w[4]), num(w[5]));
             check(line, got == unhex(w[6]));
         }
     }
-    check("hmac_sha256", bigman::hmac_sha256("key", "The quick brown fox jumps over the lazy dog")
+    check("hmac_sha256", bignum::hmac_sha256("key", "The quick brown fox jumps over the lazy dog")
           == unhex("f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8"));
     print("hash vectors: ", checks, " checks, ", failures, " failed");
     assert(failures == 0);

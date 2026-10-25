@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate test vectors for bigman, with Python as the oracle.
+"""Generate test vectors for bignum, with Python as the oracle.
 
 Writes test/vectors/bigint.txt: one case per line, `op operands... results...`,
 every number in signed lowercase hex (`-1f`, `0`); test/vectors/x25519.txt:

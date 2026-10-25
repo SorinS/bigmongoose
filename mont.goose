@@ -1,4 +1,4 @@
-// bigman.mont: constant-time modular arithmetic for an odd modulus m, over
+// bignum.mont: constant-time modular arithmetic for an odd modulus m, over
 // u32[:] limbs of m's width (little-endian, as in BigInt). Montgomery
 // multiplication (CIOS), R^2 mod m by doubling, reduction of a wider
 // number, and a fixed-window exponentiation whose table is read by
@@ -6,7 +6,7 @@
 // public; values of m, the operands and the exponent are not branched on.
 // Here R = 2^(32 * m.len).
 
-namespace bigman;
+namespace bignum;
 
 import std;
 import ct;

@@ -1,4 +1,4 @@
-// bigman.x25519: Diffie-Hellman over Curve25519 (RFC 7748), constant time.
+// bignum.x25519: Diffie-Hellman over Curve25519 (RFC 7748), constant time.
 //
 // A field element of GF(2^255 - 19) is ten signed limbs in radix 2^25.5
 // (alternately 26 and 25 bits, as in the ref10 implementation), so a limb
@@ -6,7 +6,7 @@
 // same operations whatever the values: the ladder takes 255 fixed steps
 // and swaps with masks, never a branch on a secret.
 
-namespace bigman;
+namespace bignum;
 
 import std;
 import ct;

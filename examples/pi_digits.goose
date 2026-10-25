@@ -6,19 +6,19 @@
 //   goose examples/pi_digits.goose -- 2000
 import std;
 import os;
-import bigman from "..";
+import bignum from "..";
 
 // atan(1/x) * scale
-fn atan_inv(x: u32, scale) -> bigman::BigInt {
-    var term = bigman::div(scale, bigman::big(x));     // scale / x^(2k+1)
+fn atan_inv(x: u32, scale) -> bignum::BigInt {
+    var term = bignum::div(scale, bignum::big(x));     // scale / x^(2k+1)
     var sum = copy(term);
     let x2 = x * x;
     var k: u32 = 1;
-    while !bigman::is_zero(term) {
-        bigman::div_small_to(term, x2);
+    while !bignum::is_zero(term) {
+        bignum::div_small_to(term, x2);
         var part = copy(term);
-        bigman::div_small_to(part, 2 * k + 1);
-        if k % 2 == 1 { bigman::sub_from(sum, part); } else { bigman::add_to(sum, part); }
+        bignum::div_small_to(part, 2 * k + 1);
+        if k % 2 == 1 { bignum::sub_from(sum, part); } else { bignum::add_to(sum, part); }
         k++;
     }
     return sum;
@@ -32,10 +32,10 @@ fn main() {
         if ok && v > 0 { n = v; }
     }
     let t0 = clock();
-    let scale = bigman::pow(bigman::big(10), (n + 10) as u64);
-    var pi = bigman::mul(bigman::big(16), atan_inv(5, scale));
-    bigman::sub_from(pi, bigman::mul(bigman::big(4), atan_inv(239, scale)));
-    let digits = bigman::to_str(bigman::div(pi, bigman::pow(bigman::big(10), 10)));
+    let scale = bignum::pow(bignum::big(10), (n + 10) as u64);
+    var pi = bignum::mul(bignum::big(16), atan_inv(5, scale));
+    bignum::sub_from(pi, bignum::mul(bignum::big(4), atan_inv(239, scale)));
+    let digits = bignum::to_str(bignum::div(pi, bignum::pow(bignum::big(10), 10)));
     let ms = ((clock() - t0) * 1000.0) as i64;
     print(digits[..1], ".", digits[1..::min(digits.len, 61)], "...");
     print("last digits: ...", digits[digits.len - 20..]);

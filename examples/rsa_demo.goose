@@ -4,8 +4,8 @@
 //   goose examples/rsa_demo.goose [bits]
 import std;
 import os;
-import bigman from "..";
-import bigman.rsa;
+import bignum from "..";
+import bignum.rsa;
 
 fn hex(b: const u8[:]) -> u8[>..] {
     var out: u8[>..] = [];
@@ -23,28 +23,28 @@ fn main() {
         if ok { bits = v; }
     }
     var t0 = clock();
-    let key = bigman::rsa_generate(bits);
+    let key = bignum::rsa_generate(bits);
     print(bits, "-bit key generated in ", ms(clock() - t0), " ms");
-    let pub = bigman::rsa_public(key);
-    print("n = ", hex(bigman::to_bytes_be(bigman::big_of(pub.n), bigman::rsa_size(pub)))[..32], "...");
+    let pub = bignum::rsa_public(key);
+    print("n = ", hex(bignum::to_bytes_be(bignum::big_of(pub.n), bignum::rsa_size(pub)))[..32], "...");
 
     let msg = "the quick brown fox";
-    let sig = bigman::rsa_sign_pss(key, msg);
-    print("PSS signature verifies: ", bigman::rsa_verify_pss(pub, msg, sig),
-          ", on another message: ", bigman::rsa_verify_pss(pub, "the quick brown cat", sig));
-    let sig1 = bigman::rsa_sign_pkcs1(key, msg);
-    print("PKCS #1 v1.5 signature verifies: ", bigman::rsa_verify_pkcs1(pub, msg, sig1));
+    let sig = bignum::rsa_sign_pss(key, msg);
+    print("PSS signature verifies: ", bignum::rsa_verify_pss(pub, msg, sig),
+          ", on another message: ", bignum::rsa_verify_pss(pub, "the quick brown cat", sig));
+    let sig1 = bignum::rsa_sign_pkcs1(key, msg);
+    print("PKCS #1 v1.5 signature verifies: ", bignum::rsa_verify_pkcs1(pub, msg, sig1));
 
-    let ct = bigman::rsa_encrypt_oaep(pub, "attack at dawn");
-    let pt, ok = bigman::rsa_decrypt_oaep(key, ct);
+    let ct = bignum::rsa_encrypt_oaep(pub, "attack at dawn");
+    let pt, ok = bignum::rsa_decrypt_oaep(key, ct);
     print("OAEP round trip: ", ok, " \"", pt, "\"");
 
     let reps = 20;
     t0 = clock();
-    for i in reps { let s = bigman::rsa_sign_pss(key, msg); }
+    for i in reps { let s = bignum::rsa_sign_pss(key, msg); }
     let ts = (clock() - t0) / reps;
     t0 = clock();
-    for i in reps { let v = bigman::rsa_verify_pss(pub, msg, sig); }
+    for i in reps { let v = bignum::rsa_verify_pss(pub, msg, sig); }
     let tv = (clock() - t0) / reps;
     print("sign (private key): ", ms(ts), " ms, verify (public key): ", ms(tv), " ms");
 }

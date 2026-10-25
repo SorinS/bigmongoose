@@ -4,7 +4,7 @@
 //   goose build examples/bench.goose && examples/bench
 import std;
 import os;
-import bigman from "..";
+import bignum from "..";
 
 fn random_limbs(r: rng&, n: i64) -> u32[>..] {
     var out: u32[>..] = [];
@@ -24,27 +24,27 @@ fn main() {
         var scratch: u32[>..<] = [];
         let reps = ::max(1, 2000000 / (n * n));
         var t0 = clock();
-        for i in reps { bigman::mul_school(out, a, b); }
+        for i in reps { bignum::mul_school(out, a, b); }
         let ts = (clock() - t0) / reps * 1000000.0;
         t0 = clock();
-        for i in reps { bigman::mul_kara(out, a, b, scratch); }
+        for i in reps { bignum::mul_kara(out, a, b, scratch); }
         let tk = (clock() - t0) / reps * 1000000.0;
         print(n, "  ", ts, "  ", tk);
     }
     var t0 = clock();
-    var f = bigman::one();
-    for i in 1..10001 { bigman::mul_add_small_to(f, i as u32, 0); }
-    let digits = bigman::to_str(f).len;
+    var f = bignum::one();
+    for i in 1..10001 { bignum::mul_add_small_to(f, i as u32, 0); }
+    let digits = bignum::to_str(f).len;
     print("10000! (", digits, " digits) computed and printed in ", ((clock() - t0) * 1000.0) as i64, " ms");
 
     t0 = clock();
-    let m = bigman::sub(bigman::shl(bigman::one(), 2048), bigman::big(1557));
-    let e = bigman::sub(m, bigman::big(2));
-    let x = bigman::modpow(bigman::big(3), e, m);
+    let m = bignum::sub(bignum::shl(bignum::one(), 2048), bignum::big(1557));
+    let e = bignum::sub(m, bignum::big(2));
+    let x = bignum::modpow(bignum::big(3), e, m);
     print("2048-bit modpow in ", ((clock() - t0) * 1000.0) as i64, " ms");
 
     t0 = clock();
-    let big1 = bigman::pow(bigman::big(3), 200000);
-    let sq = bigman::mul(big1, big1);
-    print("3^200000 squared (", bigman::bit_len(sq), " bits) in ", ((clock() - t0) * 1000.0) as i64, " ms");
+    let big1 = bignum::pow(bignum::big(3), 200000);
+    let sq = bignum::mul(big1, big1);
+    print("3^200000 squared (", bignum::bit_len(sq), " bits) in ", ((clock() - t0) * 1000.0) as i64, " ms");
 }

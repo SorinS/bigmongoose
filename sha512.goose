@@ -1,10 +1,10 @@
-// bigman.sha512: SHA-512 and SHA-384 (FIPS 180-4), which share one
+// bignum.sha512: SHA-512 and SHA-384 (FIPS 180-4), which share one
 // compression function and differ in their initial values and output
-// length. Streaming like bigman.sha256: sha512_init or sha384_init,
+// length. Streaming like bignum.sha256: sha512_init or sha384_init,
 // sha512_update, sha512_final; or sha512(data) and sha384(data). Nothing
 // branches on the data, only on lengths.
 
-namespace bigman;
+namespace bignum;
 
 import std;
 

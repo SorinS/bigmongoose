@@ -1,14 +1,14 @@
-// bigman.ed25519: Ed25519 signatures (RFC 8032 §5.1), on the field
-// arithmetic of bigman.x25519.
+// bignum.ed25519: Ed25519 signatures (RFC 8032 §5.1), on the field
+// arithmetic of bignum.x25519.
 //
 // Points are extended coordinates (X : Y : Z : T) on -x^2 + y^2 = 1 + d x^2 y^2,
 // added by the RFC's formulas, which are complete on this curve, so
 // doubling is an addition. Signing multiplies the base point by secret
 // scalars with 4-bit windows over all 256 bits and a table read by
-// scanning, and reduces its scalars mod L with bigman.mont, so it runs in
+// scanning, and reduces its scalars mod L with bignum.mont, so it runs in
 // constant time. Verification works on public data only.
 
-namespace bigman;
+namespace bignum;
 
 import std;
 import ct;

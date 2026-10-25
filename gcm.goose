@@ -1,4 +1,4 @@
-// bigman.gcm: AES-GCM (NIST SP 800-38D), the AEAD of TLS 1.3, constant
+// bignum.gcm: AES-GCM (NIST SP 800-38D), the AEAD of TLS 1.3, constant
 // time.
 //
 // GHASH multiplies in GF(2^128) without tables: carry-less products come
@@ -6,7 +6,7 @@
 // lanes ("holes"), as in BearSSL's ghash_ctmul64, so the time does not
 // depend on the hash key or the data.
 
-namespace bigman;
+namespace bignum;
 
 import std;
 import ct;

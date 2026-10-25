@@ -1,8 +1,8 @@
-// bigman.hmac: HMAC (RFC 2104) and HKDF (RFC 5869) over SHA-256, SHA-384
+// bignum.hmac: HMAC (RFC 2104) and HKDF (RFC 5869) over SHA-256, SHA-384
 // and SHA-512, the key derivation of TLS 1.3. `bits` picks the hash: 256,
 // 384 or 512.
 
-namespace bigman;
+namespace bignum;
 
 import std;
 import sha256;

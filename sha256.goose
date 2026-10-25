@@ -1,9 +1,9 @@
-// bigman.sha256: SHA-256 (FIPS 180-4) and MGF1 (RFC 8017 §B.2.1), for
+// bignum.sha256: SHA-256 (FIPS 180-4) and MGF1 (RFC 8017 §B.2.1), for
 // RSA's padding schemes. Streaming: sha256_init, sha256_update any number
 // of times, sha256_final; or sha256(data) in one call. Nothing branches on
 // the data, only on lengths.
 
-namespace bigman;
+namespace bignum;
 
 import std;
 

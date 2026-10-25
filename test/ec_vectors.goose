@@ -5,8 +5,8 @@
 // and fail when anything changes. Then points that are not on the curve,
 // or not encoded right, and scalars out of range.
 import std;
-import bigman from "..";
-import bigman.ec;
+import bignum from "..";
+import bignum.ec;
 
 var failures = 0;
 var checks = 0;
@@ -29,21 +29,21 @@ fn unhex(s: const u8[:]) -> u8[>..] {
     return out;
 }
 
-fn shared_ok(c: const bigman::Curve&, sk: const u8[:], peer: const u8[:]) -> bool {
-    let s, ok = bigman::ecdh_shared(c, sk, peer);
+fn shared_ok(c: const bignum::Curve&, sk: const u8[:], peer: const u8[:]) -> bool {
+    let s, ok = bignum::ecdh_shared(c, sk, peer);
     return ok;
 }
 
-fn der_ok(c: const bigman::Curve&, der: const u8[:]) -> bool {
-    let raw, ok = bigman::ecdsa_sig_from_der(c, der);
+fn der_ok(c: const bignum::Curve&, der: const u8[:]) -> bool {
+    let raw, ok = bignum::ecdsa_sig_from_der(c, der);
     return ok;
 }
 
-fn bad_points(c: const bigman::Curve&, good: const u8[:], sk: const u8[:]) {
+fn bad_points(c: const bignum::Curve&, good: const u8[:], sk: const u8[:]) {
     var off: u8[>..] = [];
     off.append(good);
     off[off.len - 1] ^= 1;                               // y changed: off the curve
-    let s1, ok1 = bigman::ecdh_shared(c, sk, off);
+    let s1, ok1 = bignum::ecdh_shared(c, sk, off);
     check("off curve", !ok1);
     check("short", !shared_ok(c, sk, good[..good.len - 1]));
     var tag: u8[>..] = [];
@@ -53,7 +53,7 @@ fn bad_points(c: const bigman::Curve&, good: const u8[:], sk: const u8[:]) {
     // x = p is out of range even though x = 0 might be on the curve.
     var big: u8[>..] = [];
     big.push(4);
-    big.append(bigman::to_bytes_be(bigman::big_of(c.p), c.len));
+    big.append(bignum::to_bytes_be(bignum::big_of(c.p), c.len));
     big.append(good[1 + c.len..]);
     check("x >= p", !shared_ok(c, sk, big));
     var inf: u8[>..] = [];
@@ -64,23 +64,23 @@ fn bad_points(c: const bigman::Curve&, good: const u8[:], sk: const u8[:]) {
     var z: u8[>..] = [];
     z.resize(c.len, 0);
     check("sk 0", !shared_ok(c, z, good));
-    check("sk n", !shared_ok(c, bigman::to_bytes_be(bigman::big_of(c.n), c.len), good));
+    check("sk n", !shared_ok(c, bignum::to_bytes_be(bignum::big_of(c.n), c.len), good));
 }
 
 fn main() {
-    let c256 = bigman::p256();
-    let c384 = bigman::p384();
+    let c256 = bignum::p256();
+    let c384 = bignum::p384();
     for line in split(embed_file("vectors/ec.txt"), '\n') {
         let w = words(line);
         if w.len == 0 { continue; }
         let c = if w[1] == "p256" { c256 } else { c384 };
         if w[0] == "mul" {
-            let k, ok = bigman::parse(w[2], 16);
-            check(line, bigman::ec_public_key(c, bigman::to_bytes_be(k, c.len)) == unhex(w[3]));
+            let k, ok = bignum::parse(w[2], 16);
+            check(line, bignum::ec_public_key(c, bignum::to_bytes_be(k, c.len)) == unhex(w[3]));
         } else if w[0] == "ecdh" {
             let sk = unhex(w[2]);
             let peer = unhex(w[3]);
-            let s, ok = bigman::ecdh_shared(c, sk, peer);
+            let s, ok = bignum::ecdh_shared(c, sk, peer);
             check(line, ok && s == unhex(w[4]));
             bad_points(c, peer, sk);
         } else if w[0] == "ecdsa" {
@@ -89,30 +89,30 @@ fn main() {
             let msg = unhex(w[4]);
             let raw = unhex(w[5]);
             let der = unhex(w[6]);
-            check(line, bigman::ec_public_key(c, sk) == pk);
-            check(line, bigman::ecdsa_sign(c, sk, msg) == raw);
-            check(line, bigman::ecdsa_verify(c, pk, msg, raw));
-            check("to der", bigman::ecdsa_sig_to_der(raw) == der);
-            let back, okd = bigman::ecdsa_sig_from_der(c, der);
+            check(line, bignum::ec_public_key(c, sk) == pk);
+            check(line, bignum::ecdsa_sign(c, sk, msg) == raw);
+            check(line, bignum::ecdsa_verify(c, pk, msg, raw));
+            check("to der", bignum::ecdsa_sig_to_der(raw) == der);
+            let back, okd = bignum::ecdsa_sig_from_der(c, der);
             check("from der", okd && back == raw);
             var other = copy(msg);
             other.push(0);
-            check("other message", !bigman::ecdsa_verify(c, pk, other, raw));
+            check("other message", !bignum::ecdsa_verify(c, pk, other, raw));
             var bad = copy(raw);
             bad[c.len + 3] ^= 0x20;
-            check("changed s", !bigman::ecdsa_verify(c, pk, msg, bad));
+            check("changed s", !bignum::ecdsa_verify(c, pk, msg, bad));
             var swapped: u8[>..] = [];
             swapped.append(raw[c.len..]);
             swapped.append(raw[..c.len]);
-            check("r s swapped", !bigman::ecdsa_verify(c, pk, msg, swapped));
+            check("r s swapped", !bignum::ecdsa_verify(c, pk, msg, swapped));
             // r = 0 and s = n are out of range.
             var zr = copy(raw);
             for i in c.len { zr[i] = 0; }
-            check("r = 0", !bigman::ecdsa_verify(c, pk, msg, zr));
+            check("r = 0", !bignum::ecdsa_verify(c, pk, msg, zr));
             var sn = copy(raw);
-            let nb = bigman::to_bytes_be(bigman::big_of(c.n), c.len);
+            let nb = bignum::to_bytes_be(bignum::big_of(c.n), c.len);
             for i in c.len { sn[c.len + i] = nb[i]; }
-            check("s = n", !bigman::ecdsa_verify(c, pk, msg, sn));
+            check("s = n", !bignum::ecdsa_verify(c, pk, msg, sn));
             // DER that is not minimal, or has trailing bytes, is refused.
             var trail = copy(der);
             trail.push(0);
@@ -135,14 +135,14 @@ fn main() {
     }
     // Round trips with fresh keys.
     for c in [c256, c384] {
-        let a, apk = bigman::ec_keypair(c);
-        let b, bpk = bigman::ec_keypair(c);
-        let s1, ok1 = bigman::ecdh_shared(c, a, bpk);
-        let s2, ok2 = bigman::ecdh_shared(c, b, apk);
+        let a, apk = bignum::ec_keypair(c);
+        let b, bpk = bignum::ec_keypair(c);
+        let s1, ok1 = bignum::ecdh_shared(c, a, bpk);
+        let s2, ok2 = bignum::ecdh_shared(c, b, apk);
         check("ecdh agree", ok1 && ok2 && s1 == s2 && s1.len == c.len);
-        let sig = bigman::ecdsa_sign(c, a, "hello");
-        check("fresh sign", bigman::ecdsa_verify(c, apk, "hello", sig));
-        check("fresh other key", !bigman::ecdsa_verify(c, bpk, "hello", sig));
+        let sig = bignum::ecdsa_sign(c, a, "hello");
+        check("fresh sign", bignum::ecdsa_verify(c, apk, "hello", sig));
+        check("fresh other key", !bignum::ecdsa_verify(c, bpk, "hello", sig));
     }
     print("ec vectors: ", checks, " checks, ", failures, " failed");
     assert(failures == 0);

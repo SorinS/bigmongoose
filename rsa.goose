@@ -1,18 +1,18 @@
-// bigman.rsa: RSA (RFC 8017) with SHA-256: key generation, PKCS #1 v1.5
+// bignum.rsa: RSA (RFC 8017) with SHA-256: key generation, PKCS #1 v1.5
 // and PSS signatures, and OAEP encryption. Keys up to 4096 bits.
 //
 // The private-key operation is constant time: CRT with Montgomery
-// exponentiation from bigman.mont over limbs of the key's width, the
+// exponentiation from bignum.mont over limbs of the key's width, the
 // reductions done bit by bit, the input blinded by a random r^e, and the
 // result checked against the public key before it is released (a fault in
 // one CRT half would otherwise give the key away). Public-key operations
 // use BigInt, as nothing in them is secret. Key generation and key loading
 // use BigInt on the primes too, so they are not constant time.
 
-namespace bigman;
+namespace bignum;
 
 import std;
-import bigman;
+import bignum;
 import ct;
 import mont;
 import sha256;

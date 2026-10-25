@@ -1,83 +1,83 @@
-# bigman
+# bignum
 
 Arbitrary-precision integers and constant-time arithmetic for the Goose
 language, written in Goose: a foundation for cryptography.
 
-- **`bigman`**: `BigInt`, signed integers of any size. Arithmetic,
+- **`bignum`**: `BigInt`, signed integers of any size. Arithmetic,
   truncating and floor division, number theory, two's-complement bit
   operations, text in bases 2–36, and bytes. Variable-time, so never use it
   on secrets.
-- **`bigman.ct`**: constant-time building blocks over fixed-width limb
+- **`bignum.ct`**: constant-time building blocks over fixed-width limb
   slices (masks, select, swap, compare, modular add/sub).
-- **`bigman.mont`**: constant-time Montgomery arithmetic for an odd modulus
+- **`bignum.mont`**: constant-time Montgomery arithmetic for an odd modulus
   (multiply, exponentiate, reduce).
-- **`bigman.x25519`**: X25519 Diffie-Hellman (RFC 7748), constant time.
-- **`bigman.ec`**: P-256 and P-384: ECDH and deterministic ECDSA (RFC
+- **`bignum.x25519`**: X25519 Diffie-Hellman (RFC 7748), constant time.
+- **`bignum.ec`**: P-256 and P-384: ECDH and deterministic ECDSA (RFC
   6979), constant time.
-- **`bigman.ed25519`**: Ed25519 signatures (RFC 8032), constant-time signing.
-- **`bigman.rsa`**: RSA with SHA-256 (RFC 8017): key generation, PKCS #1
+- **`bignum.ed25519`**: Ed25519 signatures (RFC 8032), constant-time signing.
+- **`bignum.rsa`**: RSA with SHA-256 (RFC 8017): key generation, PKCS #1
   v1.5 and PSS signatures, OAEP encryption; constant-time private key.
-- **`bigman.aes`**: AES-128/192/256 and CTR mode, bitsliced, constant time.
-- **`bigman.gcm`**: AES-GCM authenticated encryption, constant time.
-- **`bigman.sha256`**: SHA-256 and MGF1.
-- **`bigman.sha512`**: SHA-512 and SHA-384.
-- **`bigman.hmac`**: HMAC and HKDF over SHA-256, SHA-384 and SHA-512.
-- **`bigman.entropy`**: random bytes from the OS (`getentropy`), for keys.
+- **`bignum.aes`**: AES-128/192/256 and CTR mode, bitsliced, constant time.
+- **`bignum.gcm`**: AES-GCM authenticated encryption, constant time.
+- **`bignum.sha256`**: SHA-256 and MGF1.
+- **`bignum.sha512`**: SHA-512 and SHA-384.
+- **`bignum.hmac`**: HMAC and HKDF over SHA-256, SHA-384 and SHA-512.
+- **`bignum.entropy`**: random bytes from the OS (`getentropy`), for keys.
 
 ```goose
 import std;
-import bigman from "../bigmangoose";       // a path, or a git source once published
+import bignum from "../bigmongoose.git";       // a path, or a git source once published
 
 fn main() {
-    let a, ok = bigman::parse("123456789012345678901234567890");
-    let b = bigman::pow(bigman::big(2), 100);
-    print(bigman::mul(a, b));                       // print/str/format render in decimal
-    let q, r = bigman::divmod_floor(a, bigman::big(-97));
-    print(q, " ", r, " ", bigman::to_hex(b));
+    let a, ok = bignum::parse("123456789012345678901234567890");
+    let b = bignum::pow(bignum::big(2), 100);
+    print(bignum::mul(a, b));                       // print/str/format render in decimal
+    let q, r = bignum::divmod_floor(a, bignum::big(-97));
+    print(q, " ", r, " ", bignum::to_hex(b));
 }
 ```
 
 ```goose
-import bigman from "../bigmangoose";
-import bigman.x25519;
+import bignum from "../bigmongoose.git";
+import bignum.x25519;
 
-let sk, pk = bigman::x25519_keypair();
-let secret, ok = bigman::x25519_shared(sk, peer_pk);   // ok is false for a low-order peer
+let sk, pk = bignum::x25519_keypair();
+let secret, ok = bignum::x25519_shared(sk, peer_pk);   // ok is false for a low-order peer
 ```
 
 ```goose
-import bigman from "../bigmangoose";
-import bigman.rsa;
-import bigman.gcm;
+import bignum from "../bigmongoose.git";
+import bignum.rsa;
+import bignum.gcm;
 
-let key = bigman::rsa_generate(2048);
-let pub = bigman::rsa_public(key);
-let sig = bigman::rsa_sign_pss(key, msg);
-let good = bigman::rsa_verify_pss(pub, msg, sig);
-let ct = bigman::rsa_encrypt_oaep(pub, secret);
-let pt, ok = bigman::rsa_decrypt_oaep(key, ct);
+let key = bignum::rsa_generate(2048);
+let pub = bignum::rsa_public(key);
+let sig = bignum::rsa_sign_pss(key, msg);
+let good = bignum::rsa_verify_pss(pub, msg, sig);
+let ct = bignum::rsa_encrypt_oaep(pub, secret);
+let pt, ok = bignum::rsa_decrypt_oaep(key, ct);
 
-let sealed = bigman::aes_gcm_seal(key32, nonce12, aad, plaintext);   // ciphertext || tag
-let opened, ok2 = bigman::aes_gcm_open(key32, nonce12, aad, sealed);  // ok2 false if tampered
+let sealed = bignum::aes_gcm_seal(key32, nonce12, aad, plaintext);   // ciphertext || tag
+let opened, ok2 = bignum::aes_gcm_open(key32, nonce12, aad, sealed);  // ok2 false if tampered
 ```
 
 ```goose
-import bigman from "../bigmangoose";
-import bigman.ec;
-import bigman.ed25519;
-import bigman.hmac;
+import bignum from "../bigmongoose.git";
+import bignum.ec;
+import bignum.ed25519;
+import bignum.hmac;
 
-let c = bigman::p256();                                  // or bigman::p384()
-let sk, pk = bigman::ec_keypair(c);                      // pk is 04 || x || y
-let shared, ok = bigman::ecdh_shared(c, sk, peer_pk);    // ok false for an invalid point
-let sig = bigman::ecdsa_sign(c, sk, msg);                // r || s; ecdsa_sig_to_der for TLS
-let good = bigman::ecdsa_verify(c, pk, msg, sig);
+let c = bignum::p256();                                  // or bignum::p384()
+let sk, pk = bignum::ec_keypair(c);                      // pk is 04 || x || y
+let shared, ok = bignum::ecdh_shared(c, sk, peer_pk);    // ok false for an invalid point
+let sig = bignum::ecdsa_sign(c, sk, msg);                // r || s; ecdsa_sig_to_der for TLS
+let good = bignum::ecdsa_verify(c, pk, msg, sig);
 
-let seed, edpk = bigman::ed25519_keypair();
-let edsig = bigman::ed25519_sign(seed, msg);
-let edgood = bigman::ed25519_verify(edpk, msg, edsig);
+let seed, edpk = bignum::ed25519_keypair();
+let edsig = bignum::ed25519_sign(seed, msg);
+let edgood = bignum::ed25519_verify(edpk, msg, edsig);
 
-let okm = bigman::hkdf(256, salt, shared, info, 32);    // or 384, 512
+let okm = bignum::hkdf(256, salt, shared, info, 32);    // or 384, 512
 ```
 
 ## Layer 1: `BigInt`
@@ -117,16 +117,16 @@ Algorithm D.
 
 ## Layer 2: constant time
 
-`bigman.x25519` keeps a field element in ten signed limbs, radix 2^25.5 as
+`bignum.x25519` keeps a field element in ten signed limbs, radix 2^25.5 as
 in ref10, with unrolled multiply and square. The Montgomery ladder makes
 255 fixed steps and swaps with masks. At the generated-C level, the field
 ops, the ladder swap and `ct_eq_bytes` have no branches on secret data; the
 only branches are on lengths and public counters. One X25519 takes about
 85 µs in a native build (Apple Silicon, clang -O2).
 
-`bigman.ct` holds masks, `ct_select`, `ct_cswap`, `ct_eq`, `ct_lt`,
+`bignum.ct` holds masks, `ct_select`, `ct_cswap`, `ct_eq`, `ct_lt`,
 `ct_add`/`ct_sub` with carry out, `ct_cond_sub`, and `ct_mod_add`/`ct_mod_sub`,
-all over `u32[:]` of a public length. `bigman.mont` builds on them:
+all over `u32[:]` of a public length. `bignum.mont` builds on them:
 `mont_mul` (CIOS), `mont_r2` (R² mod m by doubling, so no division by a
 secret modulus), `ct_reduce` (a wide number mod m, a bit at a time), `ct_mul`,
 and `mont_modexp`, which uses a 4-bit window over every bit of the
@@ -171,11 +171,11 @@ lengths work too.
 
 ### Elliptic curves
 
-`bigman.ec` handles P-256 and P-384 with one generic implementation.
+`bignum.ec` handles P-256 and P-384 with one generic implementation.
 `p256()` and `p384()` return a `Curve` holding the field prime, the group
 order, their Montgomery constants and the generator; build one and pass it
 to every call. Field elements are limbs of the curve's width in Montgomery
-form, multiplied by `bigman.mont`. Points are projective and added with
+form, multiplied by `bignum.mont`. Points are projective and added with
 the complete formulas of Renes, Costello and Batina for a = −3. Those have
 no exceptional cases, so doubling is just an addition and the point at
 infinity needs no branch. Scalar multiplication uses 4-bit windows across
@@ -191,9 +191,9 @@ the whole scalar width and reads its table by scanning every entry.
 ECDSA nonces come from RFC 6979's HMAC-DRBG, so signing needs no
 randomness and the same input always gives the same signature.
 
-`bigman.ed25519` reuses X25519's field code. It uses extended coordinates
+`bignum.ed25519` reuses X25519's field code. It uses extended coordinates
 with the RFC's complete addition, and reduces scalars mod L through
-`bigman.mont`. Functions: `ed25519_keypair() -> seed, pk`,
+`bignum.mont`. Functions: `ed25519_keypair() -> seed, pk`,
 `ed25519_public(seed)`, `ed25519_sign(seed, msg)`,
 `ed25519_verify(pk, msg, sig)`. Verification uses the cofactored equation
 [8]SB = [8]R + [8]kA. It rejects S ≥ L and non-canonical encodings of A

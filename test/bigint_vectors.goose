@@ -1,20 +1,20 @@
 // Differential test: every case in vectors/bigint.txt (made by
-// scripts/gen_vectors.py from Python's integers) against bigman.
+// scripts/gen_vectors.py from Python's integers) against bignum.
 import std;
-import bigman from "..";
+import bignum from "..";
 
 var failures = 0;
 var cases = 0;
 
-fn hx(s: const u8[:]) -> bigman::BigInt {
-    let v, ok = bigman::parse(s, 16);
+fn hx(s: const u8[:]) -> bignum::BigInt {
+    let v, ok = bignum::parse(s, 16);
     assert(ok);
     return v;
 }
 
 fn check(line: const u8[:], got, want: const u8[:]) {
     cases++;
-    let g = bigman::to_hex(got);
+    let g = bignum::to_hex(got);
     if g != want {
         failures++;
         if failures <= 10 { print("FAIL: ", line[..::min(line.len, 120)], "\n  got  ", g, "\n  want ", want); }
@@ -30,7 +30,7 @@ fn check_bool(line: const u8[:], got: bool, want: const u8[:]) {
 }
 
 fn small(s: const u8[:]) -> i64 {
-    let v, ok = bigman::to_i64(hx(s));
+    let v, ok = bignum::to_i64(hx(s));
     assert(ok);
     return v;
 }
@@ -41,40 +41,40 @@ fn main() {
         let w = words(line);
         if w.len == 0 { continue; }
         let op = w[0];
-        if op == "add" { check(line, bigman::add(hx(w[1]), hx(w[2])), w[3]); }
-        else if op == "sub" { check(line, bigman::sub(hx(w[1]), hx(w[2])), w[3]); }
-        else if op == "cmp" { check(line, bigman::big(bigman::cmp(hx(w[1]), hx(w[2]))), w[3]); }
-        else if op == "mul" { check(line, bigman::mul(hx(w[1]), hx(w[2])), w[3]); }
+        if op == "add" { check(line, bignum::add(hx(w[1]), hx(w[2])), w[3]); }
+        else if op == "sub" { check(line, bignum::sub(hx(w[1]), hx(w[2])), w[3]); }
+        else if op == "cmp" { check(line, bignum::big(bignum::cmp(hx(w[1]), hx(w[2]))), w[3]); }
+        else if op == "mul" { check(line, bignum::mul(hx(w[1]), hx(w[2])), w[3]); }
         else if op == "divmod" {
-            let q, r = bigman::divmod(hx(w[1]), hx(w[2]));
+            let q, r = bignum::divmod(hx(w[1]), hx(w[2]));
             check(line, q, w[3]);
             check(line, r, w[4]);
         } else if op == "divmod_floor" {
-            let q, r = bigman::divmod_floor(hx(w[1]), hx(w[2]));
+            let q, r = bignum::divmod_floor(hx(w[1]), hx(w[2]));
             check(line, q, w[3]);
             check(line, r, w[4]);
-            check(line, bigman::div_floor(hx(w[1]), hx(w[2])), w[3]);
-            check(line, bigman::mod_floor(hx(w[1]), hx(w[2])), w[4]);
-        } else if op == "gcd" { check(line, bigman::gcd(hx(w[1]), hx(w[2])), w[3]); }
+            check(line, bignum::div_floor(hx(w[1]), hx(w[2])), w[3]);
+            check(line, bignum::mod_floor(hx(w[1]), hx(w[2])), w[4]);
+        } else if op == "gcd" { check(line, bignum::gcd(hx(w[1]), hx(w[2])), w[3]); }
         else if op == "modinv" {
-            let r, ok = bigman::modinv(hx(w[1]), hx(w[2]));
+            let r, ok = bignum::modinv(hx(w[1]), hx(w[2]));
             check_bool(line, ok, w[4]);
             if ok { check(line, r, w[3]); }
-        } else if op == "modpow" { check(line, bigman::modpow(hx(w[1]), hx(w[2]), hx(w[3])), w[4]); }
-        else if op == "shl" { check(line, bigman::shl(hx(w[1]), small(w[2])), w[3]); }
-        else if op == "shr" { check(line, bigman::shr(hx(w[1]), small(w[2])), w[3]); }
-        else if op == "and" { check(line, bigman::bit_and(hx(w[1]), hx(w[2])), w[3]); }
-        else if op == "or" { check(line, bigman::bit_or(hx(w[1]), hx(w[2])), w[3]); }
-        else if op == "xor" { check(line, bigman::bit_xor(hx(w[1]), hx(w[2])), w[3]); }
-        else if op == "not" { check(line, bigman::bit_not(hx(w[1])), w[2]); }
-        else if op == "bit" { check_bool(line, bigman::test_bit(hx(w[1]), small(w[2])), w[3]); }
-        else if op == "isqrt" { check(line, bigman::isqrt(hx(w[1])), w[2]); }
-        else if op == "pow" { check(line, bigman::pow(hx(w[1]), small(w[2]) as u64), w[3]); }
+        } else if op == "modpow" { check(line, bignum::modpow(hx(w[1]), hx(w[2]), hx(w[3])), w[4]); }
+        else if op == "shl" { check(line, bignum::shl(hx(w[1]), small(w[2])), w[3]); }
+        else if op == "shr" { check(line, bignum::shr(hx(w[1]), small(w[2])), w[3]); }
+        else if op == "and" { check(line, bignum::bit_and(hx(w[1]), hx(w[2])), w[3]); }
+        else if op == "or" { check(line, bignum::bit_or(hx(w[1]), hx(w[2])), w[3]); }
+        else if op == "xor" { check(line, bignum::bit_xor(hx(w[1]), hx(w[2])), w[3]); }
+        else if op == "not" { check(line, bignum::bit_not(hx(w[1])), w[2]); }
+        else if op == "bit" { check_bool(line, bignum::test_bit(hx(w[1]), small(w[2])), w[3]); }
+        else if op == "isqrt" { check(line, bignum::isqrt(hx(w[1])), w[2]); }
+        else if op == "pow" { check(line, bignum::pow(hx(w[1]), small(w[2]) as u64), w[3]); }
         else if op == "dec" {
             cases++;
-            let s = bigman::to_str(hx(w[1]));
+            let s = bignum::to_str(hx(w[1]));
             if s != w[2] { failures++; print("FAIL: ", line[..::min(line.len, 120)], " got ", s); }
-            let v, ok = bigman::parse(w[2]);
+            let v, ok = bignum::parse(w[2]);
             check(line, v, w[1]);
         } else { print("unknown op ", op); failures++; }
     }

@@ -1,4 +1,4 @@
-// bigman.ct: constant-time building blocks over fixed-width limb slices.
+// bignum.ct: constant-time building blocks over fixed-width limb slices.
 //
 // Nothing here branches on, or indexes by, the values it is given: only
 // on lengths, which are public. A mask is 0 or 0xffffffff, and a "bit" is
@@ -7,7 +7,7 @@
 // still undo them, so check the generated code (goose -o out.c) of
 // anything that matters.
 
-namespace bigman;
+namespace bignum;
 
 import std;
 

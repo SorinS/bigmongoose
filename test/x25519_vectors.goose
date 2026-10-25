@@ -2,8 +2,8 @@
 // Python transcription of RFC 7748: random scalars, and u-coordinates that
 // include non-canonical encodings (>= p, top bit set).
 import std;
-import bigman from "..";
-import bigman.x25519;
+import bignum from "..";
+import bignum.x25519;
 
 fn unhex(s: const u8[:]) -> u8[32] {
     assert(s.len == 64);
@@ -23,7 +23,7 @@ fn main() {
         let w = words(line);
         if w.len == 0 { continue; }
         n++;
-        let got = bigman::x25519(unhex(w[0]), unhex(w[1]));
+        let got = bignum::x25519(unhex(w[0]), unhex(w[1]));
         if got != unhex(w[2]) { failures++; print("FAIL: ", line); }
     }
     print("x25519 vectors: ", n, " checks, ", failures, " failed");

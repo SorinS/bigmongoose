@@ -1,4 +1,4 @@
-// bigman: arbitrary-precision signed integers.
+// bignum: arbitrary-precision signed integers.
 //
 // A BigInt is a sign and a magnitude of 32-bit limbs, least significant
 // first, always normalized: no leading zero limbs, and zero is never
@@ -12,9 +12,9 @@
 // `copy()` of a separate result.
 //
 // This layer is variable-time: never use it on secret data. The
-// constant-time layer is `bigman.ct` and `bigman.x25519`.
+// constant-time layer is `bignum.ct` and `bignum.x25519`.
 
-namespace bigman;
+namespace bignum;
 
 import std;
 

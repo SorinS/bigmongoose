@@ -1,8 +1,8 @@
-// bigman.entropy: cryptographically secure random bytes from the OS, by
+// bignum.entropy: cryptographically secure random bytes from the OS, by
 // getentropy(3) (macOS, Linux, the BSDs). std's rng is splitmix64 and is
 // not for keys.
 
-namespace bigman;
+namespace bignum;
 
 import std;
 

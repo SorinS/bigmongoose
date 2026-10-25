@@ -2,8 +2,8 @@
 // bytes, across the padding boundaries, then longer ones; each also fed in
 // uneven pieces, and MGF1 against RFC 8017's definition.
 import std;
-import bigman from "..";
-import bigman.sha256;
+import bignum from "..";
+import bignum.sha256;
 
 fn unhex(s: const u8[:]) -> u8[>..] {
     var out: u8[>..] = [];
@@ -27,29 +27,29 @@ fn main() {
         let m = unhex(w[1]);
         let want = unhex(w[2]);
         n++;
-        if bigman::sha256(m) != want { failures++; print("FAIL one-shot: ", line); }
+        if bignum::sha256(m) != want { failures++; print("FAIL one-shot: ", line); }
         // The same message in pieces of 1, 2, 3, ... bytes.
-        var s = bigman::sha256_init();
+        var s = bignum::sha256_init();
         var off = 0;
         var step = 1;
         while off < m.len {
             let end = ::min(m.len, off + step);
-            bigman::sha256_update(s, m[off..end]);
+            bignum::sha256_update(s, m[off..end]);
             off = end;
             step++;
         }
         n++;
-        if bigman::sha256_final(s) != want { failures++; print("FAIL pieces: ", line); }
+        if bignum::sha256_final(s) != want { failures++; print("FAIL pieces: ", line); }
     }
     // MGF1: block i of the mask is SHA-256(seed || i as 4 big-endian bytes).
     var mask: u8[70] = [0; 70];
-    bigman::mgf1_xor(mask, "seed");
+    bignum::mgf1_xor(mask, "seed");
     for i in 3 {
         var buf: u8[>..] = [];
         buf.append("seed");
         let c: u8[4] = [0, 0, 0, i as! u8];
         buf.append(c);
-        let d = bigman::sha256(buf);
+        let d = bignum::sha256(buf);
         for k in ::min(32, 70 - 32 * i) {
             n++;
             if mask[32 * i + k] != d[k] { failures++; }
