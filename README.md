@@ -19,6 +19,7 @@ language, written in Goose: a foundation for cryptography.
   v1.5 and PSS signatures, OAEP encryption; constant-time private key.
 - **`bignum.aes`**: AES-128/192/256 and CTR mode, bitsliced, constant time.
 - **`bignum.gcm`**: AES-GCM authenticated encryption, constant time.
+- **`bignum.chacha20`**: ChaCha20, Poly1305 and ChaCha20-Poly1305 (RFC 8439).
 - **`bignum.sha256`**: SHA-256 and MGF1.
 - **`bignum.sha512`**: SHA-512 and SHA-384.
 - **`bignum.hmac`**: HMAC and HKDF over SHA-256, SHA-384 and SHA-512.
@@ -169,6 +170,15 @@ spread into 4-bit lanes (as in BearSSL's `ghash_ctmul64`), not with tables.
 Never reuse a nonce under one key. 12 bytes is the standard size; other
 lengths work too.
 
+### ChaCha20-Poly1305
+
+`chacha20_poly1305_seal(key, nonce, aad, pt)` / `_open` and the in-place
+`_encrypt` / `_decrypt`, with the same contract as GCM: 32-byte key,
+12-byte nonce, 16-byte tag, nothing released on a bad tag. The pieces are
+public too: `chacha20_block`, `chacha20_xor(key, counter, nonce, data)`,
+and `poly1305` one-shot or streaming. Poly1305 uses five 26-bit limbs
+(after poly1305-donna-32), and its final reduction is a masked select.
+
 ### Elliptic curves
 
 `bignum.ec` handles P-256 and P-384 with one generic implementation.
@@ -221,6 +231,7 @@ Native build, Apple Silicon, clang -O2:
 | RSA-2048 public key (verify, encrypt) | 0.1 ms |
 | RSA-2048 key generation | about 0.4 s on average; 30 to 870 ms over eight runs |
 | AES-256-GCM | 58 MB/s |
+| ChaCha20-Poly1305 | 230 MB/s |
 
 ### Caveats
 
@@ -275,6 +286,9 @@ python3 scripts/gen_vectors.py          # regenerate test/vectors from Python's 
 - `hash_vectors`: SHA-384 and SHA-512 at lengths around the 128-byte block,
   one-shot and in pieces; HMAC with keys shorter and longer than a block;
   HKDF, including RFC 5869's first test case.
+- `chacha20_vectors`: RFC 8439's AEAD example, then ChaCha20 and Poly1305
+  (checked against openssl) with random keys, counters and lengths
+  around the block size, and the AEAD opened with each part tampered with.
 - `ec_vectors`: P-256 and P-384 multiples of the generator (1, 2, n − 2,
   n − 1 and random ones), ECDH, and ECDSA matching RFC 6979 byte for byte.
   Signatures also go through DER and back. Off-curve points, bad
@@ -287,10 +301,10 @@ python3 scripts/gen_vectors.py          # regenerate test/vectors from Python's 
   signatures and ciphertexts under the wrong key.
 
 `scripts/crypto_vectors.py` holds the Python transcriptions behind the
-AES, GCM, RSA, EC and Ed25519 vectors (hashes, HMAC and HKDF come from
+AES, GCM, ChaCha20-Poly1305, RSA, EC and Ed25519 vectors (hashes, HMAC and HKDF come from
 hashlib). Each transcription is first checked against its standard's
-published vectors. Then, while generating, every AES, CTR, RSA, ECDH,
-ECDSA and Ed25519 vector is also checked with the `openssl` command when
+published vectors. Then, while generating, every AES, CTR, ChaCha20,
+Poly1305, RSA, ECDH, ECDSA and Ed25519 vector is also checked with the `openssl` command when
 it is installed.
 
 The compiler is found from `--goose`, then `$GOOSE`, then `goose` on PATH,

@@ -512,6 +512,62 @@ for seed, m, pk, sig in ED_RFC:
     assert (A.hex(), S.hex()) == (pk, sig)
 
 
+# --- ChaCha20 and Poly1305 (RFC 8439) ----------------------------------------
+
+def chacha_block(key, counter, nonce):
+    def qr(x, a, b, c, d):
+        for (p, q, r, n) in ((a, b, d, 16), (c, d, b, 12), (a, b, d, 8), (c, d, b, 7)):
+            x[p] = (x[p] + x[q]) & 0xffffffff
+            x[r] ^= x[p]
+            x[r] = ((x[r] << n) | (x[r] >> (32 - n))) & 0xffffffff
+    s = [0x61707865, 0x3320646e, 0x79622d32, 0x6b206574]
+    s += [int.from_bytes(key[4 * i:4 * i + 4], "little") for i in range(8)]
+    s += [counter] + [int.from_bytes(nonce[4 * i:4 * i + 4], "little") for i in range(3)]
+    x = list(s)
+    for _ in range(10):
+        qr(x, 0, 4, 8, 12); qr(x, 1, 5, 9, 13); qr(x, 2, 6, 10, 14); qr(x, 3, 7, 11, 15)
+        qr(x, 0, 5, 10, 15); qr(x, 1, 6, 11, 12); qr(x, 2, 7, 8, 13); qr(x, 3, 4, 9, 14)
+    return b"".join(((a + b) & 0xffffffff).to_bytes(4, "little") for a, b in zip(x, s))
+
+
+def chacha_xor(key, counter, nonce, data):
+    out = bytearray()
+    for off in range(0, len(data), 64):
+        ks = chacha_block(key, counter + off // 64, nonce)
+        out += bytes(a ^ b for a, b in zip(data[off:off + 64], ks))
+    return bytes(out)
+
+
+def poly1305(key, msg):
+    r = int.from_bytes(key[:16], "little") & 0x0ffffffc0ffffffc0ffffffc0fffffff
+    s = int.from_bytes(key[16:], "little")
+    p = (1 << 130) - 5
+    acc = 0
+    for off in range(0, len(msg), 16):
+        acc = (acc + int.from_bytes(msg[off:off + 16] + b"\1", "little")) * r % p
+    return ((acc + s) % (1 << 128)).to_bytes(16, "little")
+
+
+def chacha_aead(key, nonce, aad, pt):
+    otk = chacha_block(key, 0, nonce)[:32]
+    ct = chacha_xor(key, 1, nonce, pt)
+    mac = (aad + bytes(-len(aad) % 16) + ct + bytes(-len(ct) % 16)
+           + len(aad).to_bytes(8, "little") + len(ct).to_bytes(8, "little"))
+    return ct, poly1305(otk, mac)
+
+
+_SUNSCREEN = (b"Ladies and Gentlemen of the class of '99: If I could offer you only one tip "
+              b"for the future, sunscreen would be it.")
+assert poly1305(bytes.fromhex("85d6be7857556d337f4452fe42d506a80103808afb0db2fd4abff6af4149f51b"),
+                b"Cryptographic Forum Research Group").hex() == "a8061dc1305136c6c22b8baf0c0127a9"
+assert chacha_aead(bytes(range(0x80, 0xa0)), bytes.fromhex("070000004041424344454647"),
+                   bytes.fromhex("50515253c0c1c2c3c4c5c6c7"), _SUNSCREEN)[1].hex() \
+    == "1ae10b594f09e26a7e902ecbd0600691"
+# §2.3.2: the block function's test vector, the first bytes of the output.
+assert chacha_block(bytes(range(32)), 1, bytes.fromhex("000000090000004a00000000")).hex() \
+    .startswith("10f1e7e4d13b5915500fdd1fa32071c4")
+
+
 # --- openssl cross-checks ---------------------------------------------------
 
 OPENSSL = shutil.which("openssl")
@@ -624,6 +680,18 @@ class OpenSSLCheck:
         openssl(["pkey", "-inform", "DER", "-in", der, "-out", pem])
         out = openssl(["pkeyutl", "-sign", "-rawin", "-inkey", pem, "-in", self.path("msg", msg)])
         assert out == sig, "openssl signs Ed25519 differently"
+        self.count += 1
+
+    def chacha(self, key, counter, nonce, pt, ct):
+        iv = counter.to_bytes(4, "little") + nonce
+        out = openssl(["enc", "-chacha20", "-K", key.hex(), "-iv", iv.hex()], pt)
+        assert out == ct, "openssl disagrees on ChaCha20"
+        self.count += 1
+
+    def poly1305(self, key, msg, tag):
+        out = openssl(["mac", "-macopt", f"hexkey:{key.hex()}", "-in", self.path("m", msg),
+                       "POLY1305"])
+        assert out.strip().lower() == tag.hex().encode(), "openssl disagrees on Poly1305"
         self.count += 1
 
     def done(self):
@@ -782,6 +850,40 @@ def generate():
             chk.ed25519(seed, msg, sig)
         ed.append(f"ed25519 {seed.hex()} {hx(msg)} {A.hex()} {sig.hex()}")
     out["ed25519.txt"] = ed
+
+    cc = [f"aead {hx(bytes(range(0x80, 0xa0)))} 070000004041424344454647 "
+          f"50515253c0c1c2c3c4c5c6c7 {hx(_SUNSCREEN)} "
+          + "".join(x.hex() for x in chacha_aead(bytes(range(0x80, 0xa0)),
+                                                 bytes.fromhex("070000004041424344454647"),
+                                                 bytes.fromhex("50515253c0c1c2c3c4c5c6c7"),
+                                                 _SUNSCREEN))]
+    cc[0] = cc[0][:-32] + " " + cc[0][-32:]
+    for i in range(30):
+        key, nonce = rbytes(32), rbytes(12)
+        counter = rng.choice([0, 1, 7, 0xfffffff0])          # no wrap: 400 bytes at most
+        pt = rbytes(rng.choice([0, 1, 63, 64, 65, 128, rng.randint(129, 400)]))
+        ct = chacha_xor(key, counter, nonce, pt)
+        if chk and pt:
+            chk.chacha(key, counter, nonce, pt, ct)
+        cc.append(f"chacha {hx(key)} {counter} {hx(nonce)} {hx(pt)} {hx(ct)}")
+    for i in range(30):
+        key = rbytes(32)
+        if i == 0:
+            key = b"\xff" * 32                              # r and s at their largest
+        msg = rbytes(rng.choice([0, 1, 15, 16, 17, 32, 64, rng.randint(65, 300)]))
+        if i == 1:
+            msg = b"\xff" * 64
+        tag = poly1305(key, msg)
+        if chk:
+            chk.poly1305(key, msg, tag)
+        cc.append(f"poly1305 {hx(key)} {hx(msg)} {hx(tag)}")
+    for i in range(30):
+        key, nonce = rbytes(32), rbytes(12)
+        aad = rbytes(rng.choice([0, 5, 12, 16, 33]))
+        pt = rbytes(rng.choice([0, 1, 16, 63, 64, 65, rng.randint(66, 300)]))
+        ct, tag = chacha_aead(key, nonce, aad, pt)
+        cc.append(f"aead {hx(key)} {hx(nonce)} {hx(aad)} {hx(pt)} {hx(ct)} {hx(tag)}")
+    out["chacha20.txt"] = cc
 
     if chk:
         print(f"openssl agreed on {chk.count} vectors")
