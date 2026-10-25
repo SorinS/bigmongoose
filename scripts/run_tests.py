@@ -20,7 +20,7 @@ import sys
 import tempfile
 
 ROOT = os.path.normpath(os.path.join(os.path.dirname(__file__), ".."))
-EXAMPLE_ARGS = {"pi_digits": ["500"], "factorial": ["1000"]}
+EXAMPLE_ARGS = {"pi_digits": ["500"], "factorial": ["1000"], "rsa_demo": ["1024"]}
 
 
 def find_goose(arg):

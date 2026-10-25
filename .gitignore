@@ -6,3 +6,4 @@ test/*
 !test/expected/
 !test/vectors/
 *.c
+__pycache__/

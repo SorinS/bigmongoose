@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
-"""Generate test vectors for bigman's BigInt, with Python ints as the oracle.
+"""Generate test vectors for bigman, with Python as the oracle.
 
 Writes test/vectors/bigint.txt: one case per line, `op operands... results...`,
-every number in signed lowercase hex (`-1f`, `0`); and test/vectors/x25519.txt:
-`scalar u result` as 32-byte little-endian hex, from an RFC 7748 transcription.
+every number in signed lowercase hex (`-1f`, `0`); test/vectors/x25519.txt:
+`scalar u result` as 32-byte little-endian hex, from an RFC 7748 transcription;
+and sha256.txt, aes.txt, gcm.txt and rsa.txt from hashlib and transcriptions
+of FIPS 197, SP 800-38D and RFC 8017 (see crypto_vectors.py), which are
+cross-checked against the openssl command when it is installed.
 Deterministic (fixed seed).
 
     python3 scripts/gen_vectors.py [count_per_op]
@@ -172,6 +175,9 @@ def main():
         out.append(f"dec {h(a)} {a}")
     write("bigint.txt", out)
     write("x25519.txt", x25519_vectors(max(n // 3, 10)))
+    import crypto_vectors
+    for name, lines in crypto_vectors.generate().items():
+        write(name, lines)
 
 
 def write(name, lines):

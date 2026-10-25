@@ -368,6 +368,14 @@ fn big(v: i64) -> BigInt {
     return r;
 }
 
+// The value of little-endian u32 limbs, as any array of them.
+fn big_of(xs) -> BigInt {
+    var r = zero();
+    for x in xs { r.mag.push(x); }
+    mag_trim(r.mag);
+    return r;
+}
+
 // The value as an i64, and whether it fits.
 fn to_i64(a) -> i64, bool {
     if a.mag.len > 2 { return 0, false; }
