@@ -20,9 +20,11 @@ language, written in Goose: a foundation for cryptography.
 - **`bignum.aes`**: AES-128/192/256 and CTR mode, bitsliced, constant time.
 - **`bignum.gcm`**: AES-GCM authenticated encryption, constant time.
 - **`bignum.chacha20`**: ChaCha20, Poly1305 and ChaCha20-Poly1305 (RFC 8439).
-- **`bignum.sha256`**: SHA-256 and MGF1.
-- **`bignum.sha512`**: SHA-512 and SHA-384.
-- **`bignum.hmac`**: HMAC and HKDF over SHA-256, SHA-384 and SHA-512.
+- **`bignum.sha256`**: SHA-256, SHA-224 and MGF1.
+- **`bignum.sha512`**: SHA-512, SHA-384, SHA-512/224 and SHA-512/256.
+- **`bignum.sha1`**: SHA-1, for what still needs it.
+- **`bignum.sha3`**: SHA3-224/256/384/512 and SHAKE128/256.
+- **`bignum.hmac`**: one-shot hashing, HMAC, HKDF and MGF1 over any of them.
 - **`bignum.entropy`**: random bytes from the OS (`getentropy`), for keys.
 
 ```goose
@@ -211,10 +213,18 @@ and R.
 
 ### Hashes, HMAC, HKDF
 
-`sha256`, `sha384` and `sha512` come one-shot or streaming (`*_init`,
-`*_update`, `*_final`). `hmac(bits, key, msg)` and the `hmac_sha256/384/512`
-shortcuts cover HMAC. `hkdf_extract`, `hkdf_expand` and `hkdf` cover HKDF,
-all with `bits` set to 256, 384 or 512. TLS 1.3's HKDF-Expand-Label is a
+Every hash comes one-shot or streaming (`*_init`, `*_update`, `*_final`):
+- `sha1`;
+- `sha224` and `sha256`;
+- `sha384`, `sha512`, `sha512_224` and `sha512_256`;
+- `sha3(bits, data)`, and `shake(bits, data, n)` with `shake_read` to
+  squeeze any amount.
+
+The generic functions name a hash by an id: 160 (SHA-1), 224, 256, 384,
+512, `HASH_SHA512_224`, `HASH_SHA512_256` and `HASH_SHA3_224` through
+`HASH_SHA3_512`. They include `hash_bits(id, data)`, HMAC, HKDF, MGF1, and
+RSA PKCS #1 v1.5 and PSS signatures. `hmac(id, key, msg)` and the `hmac_sha256/384/512` shortcuts cover HMAC.
+`hkdf_extract`, `hkdf_expand` and `hkdf` cover HKDF. TLS 1.3's HKDF-Expand-Label is a
 few lines on top of `hkdf_expand` and is not included.
 
 ### Speed
@@ -289,6 +299,9 @@ python3 scripts/gen_vectors.py          # regenerate test/vectors from Python's 
 - `chacha20_vectors`: RFC 8439's AEAD example, then ChaCha20 and Poly1305
   (checked against openssl) with random keys, counters and lengths
   around the block size, and the AEAD opened with each part tampered with.
+- `hash_vectors` also reads `hash2.txt`: SHA-1, SHA-224, SHA-512/t, SHA-3
+  and SHAKE (read in uneven pieces) at every length around their blocks
+  and rates, and HMAC with each of them.
 - `ec_vectors`: P-256 and P-384 multiples of the generator (1, 2, n − 2,
   n − 1 and random ones), ECDH, and ECDSA matching RFC 6979 byte for byte.
   Signatures also go through DER and back. Off-curve points, bad

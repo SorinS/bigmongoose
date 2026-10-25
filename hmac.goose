@@ -1,27 +1,66 @@
-// bignum.hmac: HMAC (RFC 2104) and HKDF (RFC 5869) over SHA-256, SHA-384
-// and SHA-512, the key derivation of TLS 1.3. `bits` picks the hash: 256,
-// 384 or 512.
+// bignum.hmac: one-shot hashing, HMAC (RFC 2104), HKDF (RFC 5869) and
+// MGF1 over any of the package's hashes, named by an id: 160 for SHA-1,
+// 224, 256, 384 and 512 for SHA-2, HASH_SHA512_224 and HASH_SHA512_256,
+// and HASH_SHA3_224 through HASH_SHA3_512. Most callers use 256 or 384,
+// the key derivation of TLS 1.3.
 
 namespace bignum;
 
 import std;
 import sha256;
 import sha512;
+import sha1;
+import sha3;
 
-fn hash_len(bits: i64) -> i64 { bits / 8 }
-fn hash_block(bits: i64) -> i64 { if bits == 256 { 64 } else { 128 } }
+let HASH_SHA1: i64 = 160;
+let HASH_SHA224: i64 = 224;
+let HASH_SHA256: i64 = 256;
+let HASH_SHA384: i64 = 384;
+let HASH_SHA512: i64 = 512;
+let HASH_SHA512_224: i64 = 5224;
+let HASH_SHA512_256: i64 = 5256;
+let HASH_SHA3_224: i64 = 3224;
+let HASH_SHA3_256: i64 = 3256;
+let HASH_SHA3_384: i64 = 3384;
+let HASH_SHA3_512: i64 = 3512;
+
+fn hash_len(bits: i64) -> i64 {
+    if bits == HASH_SHA512_224 || bits == HASH_SHA3_224 { return 28; }
+    if bits == HASH_SHA512_256 || bits == HASH_SHA3_256 { return 32; }
+    if bits == HASH_SHA3_384 { return 48; }
+    if bits == HASH_SHA3_512 { return 64; }
+    return bits / 8;
+}
+
+// The block size HMAC pads its key to.
+fn hash_block(bits: i64) -> i64 {
+    if bits == 160 || bits == 224 || bits == 256 { return 64; }
+    if bits > 3000 && bits < 4000 { return 200 - 2 * hash_len(bits); }
+    return 128;
+}
 
 // One hash of a || b, by `bits`.
 fn hash2(bits: i64, a: const u8[:], b: const u8[:]) -> u8[>..] {
     var out: u8[>..] = [];
-    if bits == 256 {
-        var s = sha256_init();
+    if bits == 256 || bits == 224 {
+        var s = if bits == 256 { sha256_init() } else { sha224_init() };
         sha256_update(s, a);
         sha256_update(s, b);
-        out.append(sha256_final(s));
+        if bits == 256 { out.append(sha256_final(s)); } else { out.append(sha224_final(s)); }
+    } else if bits == 160 {
+        var s = sha1_init();
+        sha1_update(s, a);
+        sha1_update(s, b);
+        out.append(sha1_final(s));
+    } else if bits > 3000 && bits < 4000 {
+        var s = sha3_init(bits - 3000);
+        sha3_update(s, a);
+        sha3_update(s, b);
+        out = sha3_final(s);
     } else {
-        assert(bits == 384 || bits == 512);
-        var s = if bits == 384 { sha384_init() } else { sha512_init() };
+        var s = if bits == 384 { sha384_init() } else if bits == 512 { sha512_init() }
+                else if bits == HASH_SHA512_224 { sha512_224_init() } else { sha512_256_init() };
+        assert(bits == 384 || bits == 512 || bits == HASH_SHA512_224 || bits == HASH_SHA512_256);
         sha512_update(s, a);
         sha512_update(s, b);
         out = sha512_final(s);
@@ -34,14 +73,14 @@ fn hash_bits(bits: i64, data: const u8[:]) -> u8[>..] { hash2(bits, data, "") }
 // HMAC-SHA-`bits`(key, msg).
 fn hmac(bits: i64, key: const u8[:], msg: const u8[:]) -> u8[>..] {
     let bl = hash_block(bits);
-    var k: u8[128] = [0; 128];
+    var k: u8[144] = [0; 144];
     if key.len > bl {
         let hk = hash_bits(bits, key);
         for i in hk.len { k[i] = hk[i]; }
     } else {
         for i in key.len { k[i] = key[i]; }
     }
-    var kpad: u8[128] = [0; 128];
+    var kpad: u8[144] = [0; 144];
     for i in bl { kpad[i] = k[i] ^ 0x36; }
     let inner = hash2(bits, kpad[..bl], msg);
     for i in bl { kpad[i] = k[i] ^ 0x5c; }

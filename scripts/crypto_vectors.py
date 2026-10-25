@@ -208,6 +208,10 @@ for k, iv, a, p, c, t in GCM_SPEC:
 
 DIGEST_INFO = bytes.fromhex("3031300d060960864801650304020105000420")
 DIGEST_INFOS = {"sha256": DIGEST_INFO,
+                "sha1": bytes.fromhex("3021300906052b0e03021a05000414"),
+                "sha224": bytes.fromhex("302d300d06096086480165030402040500041c"),
+                "sha512_256": bytes.fromhex("3031300d060960864801650304020605000420"),
+                "sha3_256": bytes.fromhex("3031300d060960864801650304020805000420"),
                 "sha384": bytes.fromhex("3041300d060960864801650304020205000430"),
                 "sha512": bytes.fromhex("3051300d060960864801650304020305000440")}
 
@@ -631,11 +635,11 @@ class OpenSSLCheck:
         openssl(["pkey", "-inform", "DER", "-in", der, "-out", pem])
         return pem
 
-    def verify(self, pem, msg, sig, pss_salt=None, hn="sha256"):
+    def verify(self, pem, msg, sig, pss_salt=None, hn="sha256", digest=None):
         opts = ["-pkeyopt", f"digest:{hn}"]
         if pss_salt is not None:
             opts += ["-pkeyopt", "rsa_padding_mode:pss", "-pkeyopt", f"rsa_pss_saltlen:{pss_salt}"]
-        dg = self.path("dg", hashlib.new(hn, msg).digest())
+        dg = self.path("dg", digest if digest is not None else hashlib.new(hn, msg).digest())
         sf = self.path("sig", sig)
         out = openssl(["pkeyutl", "-verify", "-inkey", pem, "-in", dg, "-sigfile", sf, *opts])
         assert b"Verified Successfully" in out, "openssl rejects a signature"
@@ -893,6 +897,7 @@ def generate():
     # vectors above stay as they were.
     key = rsa_key(1024, 1024, 65537)
     pem = chk.key(key) if chk else None
+    key2048b, pem2048b = key, pem
     rsa.append("key k2048b " + " ".join(format(key[x], "x") for x in "nedpq"))
     for bits in (384, 512, 256):
         hn = f"sha{bits}"
@@ -907,6 +912,36 @@ def generate():
             if chk:
                 chk.verify(pem, m, sig, len(salt), hn)
             rsa.append(f"pssh {bits} {hx(m)} {hx(salt)} {hx(sig)}")
+
+    # SHA-1, SHA-224 and the SHA-512/t and SHA-3 hashes, with HMAC over them
+    # and PKCS #1 v1.5 signatures under the key above.
+    ids = {"sha1": 160, "sha224": 224, "sha512_224": 5224, "sha512_256": 5256,
+           "sha3_224": 3224, "sha3_256": 3256, "sha3_384": 3384, "sha3_512": 3512}
+    more = []
+    lens = sorted(set([0, 1, 55, 56, 63, 64, 65, 71, 72, 73, 103, 104, 111, 112, 127, 128, 135, 136, 137,
+                       143, 144, 167, 168, 169, 300, rng.randint(400, 2000)]))
+    for n in lens:
+        m = rbytes(n)
+        for name, hid in ids.items():
+            more.append(f"hash {hid} {hx(m)} {hashlib.new(name, m).hexdigest()}")
+        for bits in (128, 256):
+            for outn in (1, 32, 200):
+                more.append(f"shake {bits} {hx(m)} {outn} {hashlib.new(f'shake_{bits}', m).hexdigest(outn)}")
+    for name, hid in ids.items():
+        for klen in (0, 20, 64, 72, 136, 145, 200):
+            key, msg = rbytes(klen), rbytes(rng.randint(0, 300))
+            more.append(f"hmac {hid} {hx(key)} {hx(msg)} {hmac.new(key, msg, name).hexdigest()}")
+    out["hash2.txt"] = more
+    opensslname = {"sha1": "sha1", "sha224": "sha224", "sha512_256": "sha512-256", "sha3_256": "sha3-256"}
+    for name in ("sha1", "sha224", "sha512_256", "sha3_256"):
+        m = rbytes(rng.choice([0, 40, 300]))
+        di = DIGEST_INFOS[name] + hashlib.new(name, m).digest()
+        kk = k_of(key2048b)
+        em = b"\0\1" + b"\xff" * (kk - len(di) - 3) + b"\0" + di
+        sig = i2osp(pow(int.from_bytes(em, "big"), key2048b["d"], key2048b["n"]), kk)
+        if chk:
+            chk.verify(pem2048b, m, sig, None, opensslname[name], hashlib.new(name, m).digest())
+        rsa.append(f"pkcs1h {ids[name]} {hx(m)} {hx(sig)}")
 
     if chk:
         print(f"openssl agreed on {chk.count} vectors")

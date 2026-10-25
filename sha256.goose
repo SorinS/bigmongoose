@@ -1,4 +1,4 @@
-// bignum.sha256: SHA-256 (FIPS 180-4) and MGF1 (RFC 8017 §B.2.1), for
+// bignum.sha256: SHA-256 and SHA-224 (FIPS 180-4), and MGF1 (RFC 8017 §B.2.1), for
 // RSA's padding schemes. Streaming: sha256_init, sha256_update any number
 // of times, sha256_final; or sha256(data) in one call. Nothing branches on
 // the data, only on lengths.
@@ -86,6 +86,27 @@ fn sha256_final(s: Sha256&) -> u8[32] {
         for k in 4 { out[4 * i + k] = (s.h[i] >> (24 - 8 * k)) as! u8; }
     }
     return out;
+}
+
+// SHA-224: SHA-256 from other initial values, cut to 28 bytes.
+fn sha224_init() -> Sha256 {
+    Sha256 {
+        h: [0xc1059ed8, 0x367cd507, 0x3070dd17, 0xf70e5939, 0xffc00b31, 0x68581511, 0x64f98fa7, 0xbefa4fa4],
+        buf: [0; 64], used: 0, total: 0,
+    }
+}
+
+fn sha224_final(s: Sha256&) -> u8[28] {
+    let full = sha256_final(s);
+    var out: u8[28] = [0; 28];
+    for i in 28 { out[i] = full[i]; }
+    return out;
+}
+
+fn sha224(data: const u8[:]) -> u8[28] {
+    var s = sha224_init();
+    sha256_update(s, data);
+    return sha224_final(s);
 }
 
 fn sha256(data: const u8[:]) -> u8[32] {

@@ -1,6 +1,6 @@
-// bignum.sha512: SHA-512 and SHA-384 (FIPS 180-4), which share one
-// compression function and differ in their initial values and output
-// length. Streaming like bignum.sha256: sha512_init or sha384_init,
+// bignum.sha512: SHA-512, SHA-384, SHA-512/224 and SHA-512/256 (FIPS
+// 180-4), which share one compression function and differ in their
+// initial values and output length. Streaming like bignum.sha256: sha512_init or sha384_init,
 // sha512_update, sha512_final; or sha512(data) and sha384(data). Nothing
 // branches on the data, only on lengths.
 
@@ -43,6 +43,17 @@ let SHA384_IV: u64[8] = [
     0x67332667ffc00b31, 0x8eb44a8768581511, 0xdb0c2e0d64f98fa7, 0x47b5481dbefa4fa4
 ];
 
+// SHA-512/224 and SHA-512/256 (FIPS 180-4 §5.3.6).
+let SHA512_224_IV: u64[8] = [
+    0x8c3d37c819544da2, 0x73e1996689dcd4d6, 0x1dfab7ae32ff9c82, 0x679dd514582f9fcf,
+    0x0f6d2b697bd44da8, 0x77e36f7304c48942, 0x3f9d85a86a1d36c8, 0x1112e6ad91d692a1
+];
+
+let SHA512_256_IV: u64[8] = [
+    0x22312194fc2bf72c, 0x9f555fa3c84c64c2, 0x2393b86b6f53b151, 0x963877195940eabd,
+    0x96283ee2a88effe3, 0xbe5e1e2553863992, 0x2b0199fc2c85b8aa, 0x0eb72ddc81c52ca2
+];
+
 fn rotr64(x: u64, n: u64) -> u64 { (x >> n) | (x << (64 - n)) }
 
 fn sha512_init() -> Sha512 {
@@ -51,6 +62,14 @@ fn sha512_init() -> Sha512 {
 
 fn sha384_init() -> Sha512 {
     Sha512 { h: SHA384_IV, buf: [0; 128], used: 0, total: 0, outlen: 48 }
+}
+
+fn sha512_224_init() -> Sha512 {
+    Sha512 { h: SHA512_224_IV, buf: [0; 128], used: 0, total: 0, outlen: 28 }
+}
+
+fn sha512_256_init() -> Sha512 {
+    Sha512 { h: SHA512_256_IV, buf: [0; 128], used: 0, total: 0, outlen: 32 }
 }
 
 fn sha512_block(s: Sha512&, p: const u8[:]) {

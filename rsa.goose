@@ -1,5 +1,5 @@
 // bignum.rsa: RSA (RFC 8017): key generation, PKCS #1 v1.5 and PSS
-// signatures with SHA-256, SHA-384 or SHA-512, and OAEP encryption with
+// signatures with SHA-1, SHA-2 or SHA-3 (bignum.hmac's hash ids), and OAEP encryption with
 // SHA-256. Keys up to 4096 bits.
 //
 // The private-key operation is constant time: CRT with Montgomery
@@ -29,20 +29,6 @@ struct RsaPrivateKey {
     n: u32[..128], e: u32[..128], d: u32[..128],
     p: u32[..64], q: u32[..64], dp: u32[..64], dq: u32[..64], qinv: u32[..64],
 }
-
-// DER of each hash's AlgorithmIdentifier and digest header (RFC 8017 §9.2).
-let SHA256_DIGEST_INFO: u8[19] = [
-    0x30, 0x31, 0x30, 0x0d, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01,
-    0x05, 0x00, 0x04, 0x20,
-];
-let SHA384_DIGEST_INFO: u8[19] = [
-    0x30, 0x41, 0x30, 0x0d, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x02,
-    0x05, 0x00, 0x04, 0x30,
-];
-let SHA512_DIGEST_INFO: u8[19] = [
-    0x30, 0x51, 0x30, 0x0d, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x03,
-    0x05, 0x00, 0x04, 0x40,
-];
 
 // dst = the limbs of v >= 0, exactly w of them.
 fn set_limbs<A>(dst: A&, v, w: i64) {
@@ -351,9 +337,32 @@ fn rsa_private_op(key: const RsaPrivateKey&, x: const u8[:]) -> u8[>..], bool {
 // or 512, as in bignum.hmac.
 
 // PKCS #1 v1.5 signatures (RSASSA-PKCS1-v1_5).
+
+// The DER DigestInfo header for a hash (RFC 8017 §9.2): SHA-1's own OID,
+// or the NIST hash arc 2.16.840.1.101.3.4.2.n for SHA-2 and SHA-3.
+fn digest_info(bits: i64) -> u8[>..] {
+    var di: u8[>..] = [];
+    let hl = hash_len(bits);
+    if bits == HASH_SHA1 {
+        let sha1_di: u8[15] = [0x30, 0x21, 0x30, 0x09, 0x06, 0x05, 0x2b, 0x0e, 0x03, 0x02, 0x1a, 0x05, 0x00, 0x04, 0x14];
+        di.append(sha1_di);
+        return di;
+    }
+    let arc: u8 = if bits == 256 { 1 } else if bits == 384 { 2 } else if bits == 512 { 3 } else if bits == 224 { 4 }
+                  else if bits == HASH_SHA512_224 { 5 } else if bits == HASH_SHA512_256 { 6 }
+                  else if bits == HASH_SHA3_224 { 7 } else if bits == HASH_SHA3_256 { 8 }
+                  else if bits == HASH_SHA3_384 { 9 } else { 10 };
+    let head: u8[17] = [0x30, (17 + hl) as! u8, 0x30, 0x0d, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03,
+                        0x04, 0x02, arc, 0x05, 0x00];
+    di.append(head);
+    di.push(0x04);
+    di.push(hl as! u8);
+    return di;
+}
+
 fn pkcs1_encode(em: u8[:], bits: i64, digest: const u8[:]) {
-    let di = if bits == 256 { SHA256_DIGEST_INFO } else if bits == 384 { SHA384_DIGEST_INFO } else { SHA512_DIGEST_INFO };
-    assert(digest.len == bits / 8);
+    let di = digest_info(bits);
+    assert(digest.len == hash_len(bits));
     let tlen = di.len + digest.len;
     assert(em.len >= tlen + 11);
     em[0] = 0;
@@ -377,7 +386,7 @@ fn rsa_sign_pkcs1(key: const RsaPrivateKey&, msg: const u8[:], hash: i64 = 256) 
 // The encoding is rebuilt and compared whole, rather than parsed.
 fn rsa_verify_pkcs1(key, msg: const u8[:], sig: const u8[:], hash: i64 = 256) -> bool {
     let m, ok = rsa_public_op(key, sig);
-    if !ok || m.len < hash / 8 + 30 { return false; }
+    if !ok || m.len < hash_len(hash) + 30 { return false; }
     var em: u8[>..] = [];
     em.resize(m.len, 0);
     pkcs1_encode(em, hash, hash_bits(hash, msg));
@@ -399,7 +408,7 @@ fn pss_hash(bits: i64, mhash: const u8[:], salt: const u8[:]) -> u8[>..] {
 
 fn rsa_sign_pss_with_salt(key: const RsaPrivateKey&, msg: const u8[:], salt: const u8[:],
                           hash: i64 = 256) -> u8[>..] {
-    let hl = hash / 8;
+    let hl = hash_len(hash);
     let k = rsa_size(key);
     let embits = rsa_bits(key) - 1;
     let emlen = (embits + 7) / 8;
@@ -424,13 +433,13 @@ fn rsa_sign_pss_with_salt(key: const RsaPrivateKey&, msg: const u8[:], salt: con
 
 fn rsa_sign_pss(key: const RsaPrivateKey&, msg: const u8[:], salt_len: i64 = -1, hash: i64 = 256) -> u8[>..] {
     var salt: u8[>..] = [];
-    salt.resize(if salt_len < 0 { hash / 8 } else { salt_len }, 0);
+    salt.resize(if salt_len < 0 { hash_len(hash) } else { salt_len }, 0);
     random_bytes(salt);
     return rsa_sign_pss_with_salt(key, msg, salt, hash);
 }
 
 fn rsa_verify_pss(key, msg: const u8[:], sig: const u8[:], salt_len: i64 = -1, hash: i64 = 256) -> bool {
-    let hl = hash / 8;
+    let hl = hash_len(hash);
     let slen = if salt_len < 0 { hl } else { salt_len };
     let m, ok = rsa_public_op(key, sig);
     if !ok { return false; }
