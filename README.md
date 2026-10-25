@@ -15,6 +15,8 @@ language, written in Goose: a foundation for cryptography.
 - **`bignum.ec`**: P-256, P-384 and P-521: ECDH and deterministic ECDSA
   (RFC 6979), constant time.
 - **`bignum.ed25519`**: Ed25519 signatures (RFC 8032), constant-time signing.
+- **`bignum.mlkem`**: ML-KEM-512/768/1024 (FIPS 203), post-quantum key
+  encapsulation, constant time.
 - **`bignum.rsa`**: RSA with SHA-2 (RFC 8017): key generation, PKCS #1
   v1.5 and PSS signatures, OAEP encryption; constant-time private key.
 - **`bignum.aes`**: AES-128/192/256 and CTR mode, bitsliced, constant time.
@@ -211,6 +213,20 @@ with the RFC's complete addition, and reduces scalars mod L through
 [8]SB = [8]R + [8]kA. It rejects S ≥ L and non-canonical encodings of A
 and R.
 
+### ML-KEM
+
+`mlkem_keygen(k)` gives a 64-byte seed (the private key, as in Go's
+crypto/mlkem) and the encapsulation key; k is 2, 3 or 4 for ML-KEM-512,
+-768 or -1024. `mlkem_encaps(k, ek) -> secret, ct, ok` refuses a malformed
+ek (wrong length, or a coefficient of q or more). `mlkem_decaps(k, seed,
+ct) -> secret, ok` and `mlkem_decaps_dk(k, dk, ct)` decapsulate, from the
+seed or from the expanded key that `mlkem_keys_from_seed` gives. A
+ciphertext that does not re-encrypt to itself yields the implicit
+rejection key J(z ‖ c), selected with a mask. `mlkem_encaps_with` takes
+the message, for tests. Every reduction mod q, including Compress's
+division, is a multiply and a shift (the KyberSlash class of timing leaks
+cannot occur).
+
 ### Hashes, HMAC, HKDF
 
 Every hash comes one-shot or streaming (`*_init`, `*_update`, `*_final`):
@@ -241,6 +257,7 @@ Native build, Apple Silicon, clang -O2:
 | RSA-2048 private key (sign, decrypt) | 8 ms |
 | RSA-2048 public key (verify, encrypt) | 0.1 ms |
 | RSA-2048 key generation | about 0.4 s on average; 30 to 870 ms over eight runs |
+| ML-KEM-768 keygen / encaps / decaps | 43 / 46 / 58 µs |
 | AES-256-GCM | 58 MB/s |
 | ChaCha20-Poly1305 | 230 MB/s |
 
@@ -303,6 +320,10 @@ python3 scripts/gen_vectors.py          # regenerate test/vectors from Python's 
 - `hash_vectors` also reads `hash2.txt`: SHA-1, SHA-224, SHA-512/t, SHA-3
   and SHAKE (read in uneven pieces) at every length around their blocks
   and rates, and HMAC with each of them.
+- `mlkem_vectors`: ML-KEM-512, -768 and -1024 keys from seeds must match
+  openssl byte for byte. openssl's ciphertexts must decapsulate to its
+  secrets, and changed ones to its implicit rejection keys. Malformed keys
+  and ciphertexts must be refused.
 - `ec_vectors`: P-256, P-384 and P-521 multiples of the generator (1, 2, n − 2,
   n − 1 and random ones), ECDH, and ECDSA matching RFC 6979 byte for byte.
   Signatures also go through DER and back. Off-curve points, bad

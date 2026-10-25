@@ -999,6 +999,44 @@ def generate():
         ec521.append(f"ecdsa p521 {d.to_bytes(size, 'big').hex()} {pub.hex()} {hx(msg)} {raw.hex()} {der_sig(raw).hex()}")
     out["ec521.txt"] = ec521
 
+    # ML-KEM, with openssl as the oracle: keys from seeds, its
+    # encapsulations, and its implicit rejection of a changed ciphertext.
+    # openssl's encapsulation is randomized, so this file changes when it
+    # is regenerated; without openssl it is left as it is.
+    if chk:
+        mk = []
+        for k, name in ((2, "ML-KEM-512"), (3, "ML-KEM-768"), (4, "ML-KEM-1024")):
+            for t in range(3):
+                seed = bytes(64) if t == 0 else (b"\xff" * 64 if t == 1 else rbytes(64))
+                pem = chk.path("mk.pem")
+                openssl(["genpkey", "-algorithm", name, "-pkeyopt", f"hexseed:{seed.hex()}", "-out", pem])
+                text = openssl(["pkey", "-in", pem, "-text", "-noout"]).decode()
+                parts = {}
+                cur = None
+                for line in text.splitlines():
+                    if line.endswith(":") and not line.startswith(" "):
+                        cur = line[:-1]
+                        parts[cur] = ""
+                    elif cur and line.startswith(" "):
+                        parts[cur] += line.strip().replace(":", "")
+                assert parts["seed"] == seed.hex()
+                mk.append(f"mlkem {k} {seed.hex()} {parts['ek']} {parts['dk']}")
+                pub = chk.path("mkpub.pem")
+                openssl(["pkey", "-in", pem, "-pubout", "-out", pub])
+                for e in range(3):
+                    ctf, ssf = chk.path("ct"), chk.path("ss")
+                    openssl(["pkeyutl", "-encap", "-inkey", pub, "-pubin", "-out", ctf, "-secret", ssf])
+                    ct, ss = open(ctf, "rb").read(), open(ssf, "rb").read()
+                    mk.append(f"encap {k} {seed.hex()} {ct.hex()} {ss.hex()}")
+                    bad = bytearray(ct)
+                    bad[rng.randrange(len(bad))] ^= 1 << rng.randrange(8)
+                    with open(ctf, "wb") as f:
+                        f.write(bad)
+                    openssl(["pkeyutl", "-decap", "-inkey", pem, "-in", ctf, "-secret", ssf])
+                    mk.append(f"reject {k} {seed.hex()} {bytes(bad).hex()} {open(ssf, 'rb').read().hex()}")
+                    chk.count += 2
+        out["mlkem.txt"] = mk
+
     if chk:
         print(f"openssl agreed on {chk.count} vectors")
         chk.done()
