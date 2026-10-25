@@ -15,7 +15,7 @@ language, written in Goose: a foundation for cryptography.
 - **`bignum.ec`**: P-256 and P-384: ECDH and deterministic ECDSA (RFC
   6979), constant time.
 - **`bignum.ed25519`**: Ed25519 signatures (RFC 8032), constant-time signing.
-- **`bignum.rsa`**: RSA with SHA-256 (RFC 8017): key generation, PKCS #1
+- **`bignum.rsa`**: RSA with SHA-2 (RFC 8017): key generation, PKCS #1
   v1.5 and PSS signatures, OAEP encryption; constant-time private key.
 - **`bignum.aes`**: AES-128/192/256 and CTR mode, bitsliced, constant time.
 - **`bignum.gcm`**: AES-GCM authenticated encryption, constant time.
@@ -138,12 +138,12 @@ exponent's width and reads its table by scanning all 16 entries.
 | Group | Functions |
 |---|---|
 | Keys | `rsa_generate(bits, e = 65537)` (1024 to 4096, a multiple of 64), `rsa_key_from(n, e, d, p, q) -> key, bool`, `rsa_public_from(n, e) -> pub, bool`, `rsa_public(key)`, `rsa_bits`, `rsa_size` |
-| PKCS #1 v1.5 | `rsa_sign_pkcs1(key, msg)`, `rsa_verify_pkcs1(pub, msg, sig)` |
-| PSS | `rsa_sign_pss(key, msg, salt_len = 32)`, `rsa_sign_pss_with_salt`, `rsa_verify_pss(pub, msg, sig, salt_len = 32)` |
+| PKCS #1 v1.5 | `rsa_sign_pkcs1(key, msg, hash = 256)`, `rsa_verify_pkcs1(pub, msg, sig, hash = 256)` |
+| PSS | `rsa_sign_pss(key, msg, salt_len = -1, hash = 256)`, `rsa_sign_pss_with_salt(key, msg, salt, hash = 256)`, `rsa_verify_pss(pub, msg, sig, salt_len = -1, hash = 256)`; a salt_len of -1 means the hash's length |
 | OAEP | `rsa_encrypt_oaep(pub, msg, label = "")`, `rsa_encrypt_oaep_with_seed`, `rsa_decrypt_oaep(key, ct, label = "") -> msg, bool`, `rsa_oaep_max` |
 | Raw | `rsa_public_op(pub, x)`, `rsa_private_op(key, x) -> bytes, bool` |
 
-All of them hash with SHA-256 (MGF1-SHA-256 too). A key is fixed-size limb
+Signatures hash with SHA-256, SHA-384 or SHA-512 (`hash` is 256, 384 or 512), with PSS's MGF1 on the same hash; OAEP uses SHA-256. A key is fixed-size limb
 arrays (`u32[..128]`, so at most 4096 bits), and every function that only
 needs the public half accepts a private key as well. The private operation
 works by CRT. It blinds its input with r^e for a random r, and checks the

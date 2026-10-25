@@ -207,6 +207,9 @@ for k, iv, a, p, c, t in GCM_SPEC:
 # --- RSA (RFC 8017, SHA-256) ------------------------------------------------
 
 DIGEST_INFO = bytes.fromhex("3031300d060960864801650304020105000420")
+DIGEST_INFOS = {"sha256": DIGEST_INFO,
+                "sha384": bytes.fromhex("3041300d060960864801650304020205000430"),
+                "sha512": bytes.fromhex("3051300d060960864801650304020305000440")}
 
 
 def is_probable_prime(n, rounds=40):
@@ -257,11 +260,11 @@ def i2osp(x, k):
     return x.to_bytes(k, "big")
 
 
-def mgf1(seed, n):
+def mgf1(seed, n, hn="sha256"):
     out = b""
     c = 0
     while len(out) < n:
-        out += hashlib.sha256(seed + c.to_bytes(4, "big")).digest()
+        out += hashlib.new(hn, seed + c.to_bytes(4, "big")).digest()
         c += 1
     return out[:n]
 
@@ -274,20 +277,21 @@ def k_of(key):
     return (key["n"].bit_length() + 7) // 8
 
 
-def pkcs1_sign(key, msg):
+def pkcs1_sign(key, msg, hn="sha256"):
     k = k_of(key)
-    t = DIGEST_INFO + hashlib.sha256(msg).digest()
+    t = DIGEST_INFOS[hn] + hashlib.new(hn, msg).digest()
     em = b"\0\1" + b"\xff" * (k - len(t) - 3) + b"\0" + t
     return i2osp(pow(int.from_bytes(em, "big"), key["d"], key["n"]), k)
 
 
-def pss_sign(key, msg, salt):
+def pss_sign(key, msg, salt, hn="sha256"):
     embits = key["n"].bit_length() - 1
     emlen = (embits + 7) // 8
-    mhash = hashlib.sha256(msg).digest()
-    h = hashlib.sha256(b"\0" * 8 + mhash + salt).digest()
-    db = b"\0" * (emlen - len(salt) - 34) + b"\1" + salt
-    masked = bytearray(xor(db, mgf1(h, emlen - 33)))
+    hl = hashlib.new(hn).digest_size
+    mhash = hashlib.new(hn, msg).digest()
+    h = hashlib.new(hn, b"\0" * 8 + mhash + salt).digest()
+    db = b"\0" * (emlen - len(salt) - hl - 2) + b"\1" + salt
+    masked = bytearray(xor(db, mgf1(h, emlen - hl - 1, hn)))
     masked[0] &= 0xFF >> (8 * emlen - embits)
     em = bytes(masked) + h + b"\xbc"
     return i2osp(pow(int.from_bytes(em, "big"), key["d"], key["n"]), k_of(key))
@@ -627,11 +631,11 @@ class OpenSSLCheck:
         openssl(["pkey", "-inform", "DER", "-in", der, "-out", pem])
         return pem
 
-    def verify(self, pem, msg, sig, pss_salt=None):
-        opts = ["-pkeyopt", "digest:sha256"]
+    def verify(self, pem, msg, sig, pss_salt=None, hn="sha256"):
+        opts = ["-pkeyopt", f"digest:{hn}"]
         if pss_salt is not None:
             opts += ["-pkeyopt", "rsa_padding_mode:pss", "-pkeyopt", f"rsa_pss_saltlen:{pss_salt}"]
-        dg = self.path("dg", hashlib.sha256(msg).digest())
+        dg = self.path("dg", hashlib.new(hn, msg).digest())
         sf = self.path("sig", sig)
         out = openssl(["pkeyutl", "-verify", "-inkey", pem, "-in", dg, "-sigfile", sf, *opts])
         assert b"Verified Successfully" in out, "openssl rejects a signature"
@@ -884,6 +888,25 @@ def generate():
         ct, tag = chacha_aead(key, nonce, aad, pt)
         cc.append(f"aead {hx(key)} {hx(nonce)} {hx(aad)} {hx(pt)} {hx(ct)} {hx(tag)}")
     out["chacha20.txt"] = cc
+
+    # SHA-384 and SHA-512 signatures, under a key of their own so that the
+    # vectors above stay as they were.
+    key = rsa_key(1024, 1024, 65537)
+    pem = chk.key(key) if chk else None
+    rsa.append("key k2048b " + " ".join(format(key[x], "x") for x in "nedpq"))
+    for bits in (384, 512, 256):
+        hn = f"sha{bits}"
+        for i in range(2):
+            m = rbytes(rng.choice([0, 40, 300]))
+            sig = pkcs1_sign(key, m, hn)
+            if chk:
+                chk.verify(pem, m, sig, None, hn)
+            rsa.append(f"pkcs1h {bits} {hx(m)} {hx(sig)}")
+            salt = rbytes(bits // 8 if i == 0 else 20)
+            sig = pss_sign(key, m, salt, hn)
+            if chk:
+                chk.verify(pem, m, sig, len(salt), hn)
+            rsa.append(f"pssh {bits} {hx(m)} {hx(salt)} {hx(sig)}")
 
     if chk:
         print(f"openssl agreed on {chk.count} vectors")

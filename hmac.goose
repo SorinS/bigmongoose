@@ -87,3 +87,17 @@ fn hkdf(bits: i64, salt: const u8[:], ikm: const u8[:], info: const u8[:], len: 
     let prk = hkdf_extract(bits, salt, ikm);
     return hkdf_expand(bits, prk, info, len);
 }
+
+// out ^= MGF1 with SHA-`bits` (RFC 8017 §B.2.1), over out's whole length.
+fn mgf1(bits: i64, out: u8[:], seed: const u8[:]) {
+    var counter: u32 = 0;
+    var off = 0;
+    while off < out.len {
+        let c: u8[4] = [(counter >> 24) as! u8, (counter >> 16) as! u8, (counter >> 8) as! u8, counter as! u8];
+        let d = hash2(bits, seed, c);
+        let n = ::min(d.len, out.len - off);
+        for k in n { out[off + k] ^= d[k]; }
+        off += n;
+        counter++;
+    }
+}

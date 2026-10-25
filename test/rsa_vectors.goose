@@ -1,6 +1,7 @@
 // RSA against vectors/rsa.txt: keys of 1024 bits, 1025 bits from unbalanced
 // primes (PSS's encoding a byte shorter than the modulus), 1536 bits with
-// e = 3, and 2048 bits; for each, PKCS #1 v1.5 and PSS signatures and OAEP
+// e = 3, and 2048 bits (one more for SHA-384 and SHA-512 signatures,
+// lines pkcs1h and pssh); for each, PKCS #1 v1.5 and PSS signatures and OAEP
 // ciphertexts made by a Python transcription of RFC 8017 and checked
 // against openssl. Signing and encrypting with the same salt or seed must
 // give the same bytes, and verification and decryption must accept them
@@ -49,6 +50,25 @@ fn main() {
         }
         let pub = bignum::rsa_public(key);
         let msg = unhex(w[2]);
+        if w[0] == "pkcs1h" || w[0] == "pssh" {
+            let bits, okb = parse_int(w[1], 10);
+            if w[0] == "pkcs1h" {
+                let sig = unhex(w[3]);
+                check(line, bignum::rsa_sign_pkcs1(key, msg, bits) == sig);
+                check(line, bignum::rsa_verify_pkcs1(pub, msg, sig, bits));
+                // The same signature under another hash does not verify.
+                check("pkcs1 other hash", !bignum::rsa_verify_pkcs1(pub, msg, sig, if bits == 256 { 384 } else { 256 }));
+            } else {
+                let salt = unhex(w[3]);
+                let sig = unhex(w[4]);
+                check(line, bignum::rsa_sign_pss_with_salt(key, msg, salt, bits) == sig);
+                check(line, bignum::rsa_verify_pss(pub, msg, sig, salt.len, bits));
+                check("pss other hash", !bignum::rsa_verify_pss(pub, msg, sig, salt.len, if bits == 512 { 384 } else { 512 }));
+                let fresh = bignum::rsa_sign_pss(key, msg, -1, bits);
+                check("pss default salt", bignum::rsa_verify_pss(pub, msg, fresh, -1, bits));
+            }
+            continue;
+        }
         if w[0] == "pkcs1" {
             let sig = unhex(w[3]);
             check(line, bignum::rsa_sign_pkcs1(key, msg) == sig);
