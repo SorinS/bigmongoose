@@ -45,6 +45,8 @@ fn main() {
     let p384 = bignum::p384();
     curve_demo("P-256", p256);
     curve_demo("P-384", p384);
+    let p521 = bignum::p521();
+    curve_demo("P-521", p521);
 
     let seed, pk = bignum::ed25519_keypair();
     let sig = bignum::ed25519_sign(seed, "hello");

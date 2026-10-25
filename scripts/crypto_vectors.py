@@ -333,7 +333,26 @@ CURVES = {
         gy=int("3617de4a96262c6f5d9e98bf9292dc29f8f41dbd289a147ce9da3113b5f0b8c0"
                "0a60b1ce1d7e819d7a431d7c90ea0e5f", 16),
         size=48, hash="sha384", oid="2b81040022"),
+    "p521": dict(
+        p=2 ** 521 - 1,
+        n=int("1ff" + "ffffffff" * 7 + "fffffffa51868783bf2f966b7fcc0148f709a5d03bb5c9b8899c47aebb6fb71e91386409", 16),
+        b=int("0051953eb9618e1c9a1f929a21a0b68540eea2da725b99b315f3b8b489918ef109e156193951ec7e937b1652c0bd"
+              "3bb1bf073573df883d2c34f1ef451fd46b503f00", 16),
+        gx=int("00c6858e06b70404e9cd9e3ecb662395b4429c648139053fb521f828af606b4d3dbaa14b5e77efe75928fe1dc127"
+               "a2ffa8de3348b3c1856a429bf97e7e31c2e5bd66", 16),
+        gy=int("011839296a789a3bc0045c8a5fb42c7d1bd998f54449579b446817afbd17273e662c97ee72995ef42640c550b9013f"
+               "ad0761353c7086a272c24088be94769fd16650", 16),
+        size=66, hash="sha512", oid="2b81040023"),
 }
+
+
+def bits2int(c, b):
+    """The leftmost bits of b, as many as the order has (RFC 6979 §2.3.2)."""
+    x = int.from_bytes(b, "big")
+    qbits = c["n"].bit_length()
+    if 8 * len(b) > qbits:
+        x >>= 8 * len(b) - qbits
+    return x
 
 
 def ec_add(c, P, Q):
@@ -376,14 +395,17 @@ def ec_encode(c, P):
 def rfc6979_k(c, d, h):
     size, hn, n = c["size"], c["hash"], c["n"]
     x = d.to_bytes(size, "big")
-    h1 = (int.from_bytes(h[:size], "big") % n).to_bytes(size, "big")
+    h1 = (bits2int(c, h) % n).to_bytes(size, "big")
     v, k = b"\1" * len(h), b"\0" * len(h)
     for sep in (b"\0", b"\1"):
         k = hmac.new(k, v + sep + x + h1, hn).digest()
         v = hmac.new(k, v, hn).digest()
     while True:
-        v = hmac.new(k, v, hn).digest()
-        cand = int.from_bytes(v[:size], "big")
+        t = b""
+        while len(t) < size:
+            v = hmac.new(k, v, hn).digest()
+            t += v
+        cand = bits2int(c, t)
         if 1 <= cand < n:
             yield cand
         k = hmac.new(k, v + b"\0", hn).digest()
@@ -393,7 +415,7 @@ def rfc6979_k(c, d, h):
 def ecdsa_sign(c, d, msg):
     n = c["n"]
     h = hashlib.new(c["hash"], msg).digest()
-    e = int.from_bytes(h[:c["size"]], "big")
+    e = bits2int(c, h)
     for k in rfc6979_k(c, d, h):
         r = ec_mul(c, k, (c["gx"], c["gy"]))[0] % n
         s = pow(k, -1, n) * (e + r * d) % n
@@ -412,6 +434,12 @@ RFC6979 = [
      "81a648152e44acf96e36dd1e80fabe46"
      "99ef4aeb15f178cea1fe40db2603138f130e740a19624526203b6351d0a3a94f"
      "a329c145786e679e7b82c71a38628ac8"),
+    ("p521", int("0fad06daa62ba3b25d2fb40133da757205de67f5bb0018fee8c86e1b68c7e75caa896eb32f1f47c70855836a6d16fcc1"
+                 "466f6d8fbec67db89ec0c08b0e996b83538", 16),
+     "00c328fafcbd79dd77850370c46325d987cb525569fb63c5d3bc53950e6d4c5f174e25a1ee9017b5d450606add152b5349"
+     "31d7d4e8455cc91f9b15bf05ec36e377fa"
+     "00617cce7cf5064806c467f678d3b4080d6f1cc50af26ca209417308281b68af282623eaa63e5b5c0723d8b8c37ff0777b"
+     "1a20f8ccb1dccc43997f1ee0e44da4a67a"),
 ]
 
 
@@ -423,7 +451,7 @@ def der_sig(raw):
         return b"\2" + bytes([len(b)]) + b
     half = len(raw) // 2
     body = i(raw[:half]) + i(raw[half:])
-    return b"\x30" + bytes([len(body)]) + body
+    return b"\x30" + der_len(len(body)) + body
 
 
 # --- Ed25519 (RFC 8032 §5.1, after its Python reference) ---------------------
@@ -819,11 +847,12 @@ def generate():
     out["hash.txt"] = hashes
 
     ec = []
-    for name, d, sig in RFC6979:
+    for name, d, sig in RFC6979[:2]:
         c = CURVES[name]
         ec_check(c)
         assert ecdsa_sign(c, d, b"sample").hex() == sig
-    for name, c in CURVES.items():
+    for name in ("p256", "p384"):
+        c = CURVES[name]
         n, size = c["n"], c["size"]
         G = (c["gx"], c["gy"])
         for k in [1, 2, 3, n - 1, n - 2] + [rng.randrange(1, n) for _ in range(6)]:
@@ -893,6 +922,7 @@ def generate():
         cc.append(f"aead {hx(key)} {hx(nonce)} {hx(aad)} {hx(pt)} {hx(ct)} {hx(tag)}")
     out["chacha20.txt"] = cc
 
+
     # SHA-384 and SHA-512 signatures, under a key of their own so that the
     # vectors above stay as they were.
     key = rsa_key(1024, 1024, 65537)
@@ -942,6 +972,32 @@ def generate():
         if chk:
             chk.verify(pem2048b, m, sig, None, opensslname[name], hashlib.new(name, m).digest())
         rsa.append(f"pkcs1h {ids[name]} {hx(m)} {hx(sig)}")
+
+    # P-521, after everything else so the vectors above stay as they were.
+    ec521 = []
+    c = CURVES["p521"]
+    ec_check(c)
+    assert ecdsa_sign(c, RFC6979[2][1], b"sample").hex() == RFC6979[2][2]
+    n, size = c["n"], c["size"]
+    G = (c["gx"], c["gy"])
+    for k in [1, 2, n - 1, n - 2] + [rng.randrange(1, n) for _ in range(4)]:
+        ec521.append(f"mul p521 {format(k, 'x')} {ec_encode(c, ec_mul(c, k, G)).hex()}")
+    for i in range(5):
+        d1, d2 = rng.randrange(1, n), rng.randrange(1, n)
+        p2 = ec_encode(c, ec_mul(c, d2, G))
+        shared = ec_mul(c, d1, ec_mul(c, d2, G))[0].to_bytes(size, "big")
+        if chk:
+            chk.ecdh("p521", d1, d2, shared)
+        ec521.append(f"ecdh p521 {d1.to_bytes(size, 'big').hex()} {p2.hex()} {shared.hex()}")
+    for i in range(6):
+        d = rng.randrange(1, n)
+        msg = rbytes(rng.choice([0, 6, 100]))
+        raw = ecdsa_sign(c, d, msg)
+        if chk:
+            chk.ecdsa("p521", d, msg, raw)
+        pub = ec_encode(c, ec_mul(c, d, G))
+        ec521.append(f"ecdsa p521 {d.to_bytes(size, 'big').hex()} {pub.hex()} {hx(msg)} {raw.hex()} {der_sig(raw).hex()}")
+    out["ec521.txt"] = ec521
 
     if chk:
         print(f"openssl agreed on {chk.count} vectors")

@@ -12,8 +12,8 @@ language, written in Goose: a foundation for cryptography.
 - **`bignum.mont`**: constant-time Montgomery arithmetic for an odd modulus
   (multiply, exponentiate, reduce).
 - **`bignum.x25519`**: X25519 Diffie-Hellman (RFC 7748), constant time.
-- **`bignum.ec`**: P-256 and P-384: ECDH and deterministic ECDSA (RFC
-  6979), constant time.
+- **`bignum.ec`**: P-256, P-384 and P-521: ECDH and deterministic ECDSA
+  (RFC 6979), constant time.
 - **`bignum.ed25519`**: Ed25519 signatures (RFC 8032), constant-time signing.
 - **`bignum.rsa`**: RSA with SHA-2 (RFC 8017): key generation, PKCS #1
   v1.5 and PSS signatures, OAEP encryption; constant-time private key.
@@ -183,8 +183,8 @@ and `poly1305` one-shot or streaming. Poly1305 uses five 26-bit limbs
 
 ### Elliptic curves
 
-`bignum.ec` handles P-256 and P-384 with one generic implementation.
-`p256()` and `p384()` return a `Curve` holding the field prime, the group
+`bignum.ec` handles P-256, P-384 and P-521 with one generic
+implementation. `p256()`, `p384()` and `p521()` return a `Curve` holding the field prime, the group
 order, their Montgomery constants and the generator; build one and pass it
 to every call. Field elements are limbs of the curve's width in Montgomery
 form, multiplied by `bignum.mont`. Points are projective and added with
@@ -197,7 +197,7 @@ the whole scalar width and reads its table by scanning every entry.
 |---|---|
 | Keys | `ec_keypair(c) -> sk, pk`, `ec_public_key(c, sk)`; private keys are `len` big-endian bytes (32 or 48), public keys the uncompressed 04 ‖ x ‖ y |
 | ECDH | `ecdh_shared(c, sk, peer) -> x, bool`: false unless the peer's point is on the curve and correctly encoded |
-| ECDSA | `ecdsa_sign(c, sk, msg)`, `ecdsa_verify(c, pk, msg, sig)` with SHA-256 on P-256 and SHA-384 on P-384; `ecdsa_verify_digest` for any hash |
+| ECDSA | `ecdsa_sign(c, sk, msg)`, `ecdsa_verify(c, pk, msg, sig)` with SHA-256 on P-256, SHA-384 on P-384 and SHA-512 on P-521; `ecdsa_verify_digest` for any hash |
 | DER | `ecdsa_sig_to_der(raw)`, `ecdsa_sig_from_der(c, der) -> raw, bool` (strict: minimal integers, no trailing bytes) |
 
 ECDSA nonces come from RFC 6979's HMAC-DRBG, so signing needs no
@@ -237,6 +237,7 @@ Native build, Apple Silicon, clang -O2:
 | Ed25519 sign / verify | 0.3 ms / 0.3 ms |
 | P-256 ECDH / ECDSA sign / verify | 1.1 / 1.2 / 2.2 ms |
 | P-384 ECDH / ECDSA sign / verify | 3.4 / 3.6 / 6.8 ms |
+| P-521 ECDH / ECDSA sign / verify | 7.8 / 8.3 / 16 ms |
 | RSA-2048 private key (sign, decrypt) | 8 ms |
 | RSA-2048 public key (verify, encrypt) | 0.1 ms |
 | RSA-2048 key generation | about 0.4 s on average; 30 to 870 ms over eight runs |
@@ -302,7 +303,7 @@ python3 scripts/gen_vectors.py          # regenerate test/vectors from Python's 
 - `hash_vectors` also reads `hash2.txt`: SHA-1, SHA-224, SHA-512/t, SHA-3
   and SHAKE (read in uneven pieces) at every length around their blocks
   and rates, and HMAC with each of them.
-- `ec_vectors`: P-256 and P-384 multiples of the generator (1, 2, n − 2,
+- `ec_vectors`: P-256, P-384 and P-521 multiples of the generator (1, 2, n − 2,
   n − 1 and random ones), ECDH, and ECDSA matching RFC 6979 byte for byte.
   Signatures also go through DER and back. Off-curve points, bad
   encodings, out-of-range scalars, r = 0, s = n and non-minimal DER are

@@ -1,9 +1,10 @@
-// bignum.ec: the NIST curves P-256 and P-384 (y^2 = x^3 - 3x + b over a
-// prime field): ECDH key agreement, and ECDSA with SHA-256 on P-256 and
-// SHA-384 on P-384, its nonces derived deterministically (RFC 6979).
+// bignum.ec: the NIST curves P-256, P-384 and P-521 (y^2 = x^3 - 3x + b
+// over a prime field): ECDH key agreement, and ECDSA with SHA-256 on
+// P-256, SHA-384 on P-384 and SHA-512 on P-521, its nonces derived
+// deterministically (RFC 6979).
 //
-// One generic implementation serves both curves: field elements are
-// limbs of the curve's width (8 or 12) in Montgomery form, multiplied by
+// One generic implementation serves all three: field elements are
+// limbs of the curve's width (8, 12 or 17) in Montgomery form, multiplied by
 // bignum.mont. Points are projective and added by the complete formulas of
 // Renes, Costello and Batina (2016, algorithm 4 for a = -3), which have no
 // exceptional cases, so doubling is an addition and the point at infinity
@@ -23,102 +24,102 @@ import entropy;
 // The field prime p and group order n with their Montgomery constants, and
 // p - 2, n - 2 for inversion by Fermat. b, gx and gy are in Montgomery form.
 struct Curve {
-    nl: i64, len: i64, hash: i64,
-    p: u32[..12], p0i: u32, r2p: u32[..12], pm2: u32[..12],
-    n: u32[..12], n0i: u32, r2n: u32[..12], nm2: u32[..12],
-    b: u32[..12], gx: u32[..12], gy: u32[..12],
+    nl: i64, len: i64, bits: i64, hash: i64,     // limbs, bytes and bits of n, the signing hash
+    p: u32[..17], p0i: u32, r2p: u32[..17], pm2: u32[..17],
+    n: u32[..17], n0i: u32, r2n: u32[..17], nm2: u32[..17],
+    b: u32[..17], gx: u32[..17], gy: u32[..17],
 }
 
 // Projective (X : Y : Z), Montgomery form; (0 : 1 : 0) is infinity.
-struct EcPoint { x: u32[..12], y: u32[..12], z: u32[..12] }
+struct EcPoint { x: u32[..17], y: u32[..17], z: u32[..17] }
 
-fn ec_zero(c: const Curve&) -> u32[..12] {
-    var r: u32[..12] = [];
+fn ec_zero(c: const Curve&) -> u32[..17] {
+    var r: u32[..17] = [];
     r.resize(c.nl, 0);
     return r;
 }
 
-fn ec_limbs(c: const Curve&, v) -> u32[..12] {
+fn ec_limbs(c: const Curve&, v) -> u32[..17] {
     var r = ec_zero(c);
     for i in v.mag.len { r[i] = v.mag[i]; }
     return r;
 }
 
-fn ec_hex(c: const Curve&, s: const u8[:]) -> u32[..12] {
+fn ec_hex(c: const Curve&, s: const u8[:]) -> u32[..17] {
     let v, ok = parse(s, 16);
     assert(ok);
     return ec_limbs(c, v);
 }
 
 // Field arithmetic mod p.
-fn fmul(c: const Curve&, a: const u32[:], b: const u32[:]) -> u32[..12] {
+fn fmul(c: const Curve&, a: const u32[:], b: const u32[:]) -> u32[..17] {
     var r = ec_zero(c);
-    var t: u32[14] = [0; 14];
+    var t: u32[19] = [0; 19];
     mont_mul(r[..], a, b, c.p[..], c.p0i, t[..c.nl + 2]);
     return r;
 }
 
-fn fadd(c: const Curve&, a: const u32[:], b: const u32[:]) -> u32[..12] {
+fn fadd(c: const Curve&, a: const u32[:], b: const u32[:]) -> u32[..17] {
     var r = ec_zero(c);
     ct_mod_add(r[..], a, b, c.p[..]);
     return r;
 }
 
-fn fsub(c: const Curve&, a: const u32[:], b: const u32[:]) -> u32[..12] {
+fn fsub(c: const Curve&, a: const u32[:], b: const u32[:]) -> u32[..17] {
     var r = ec_zero(c);
     ct_mod_sub(r[..], a, b, c.p[..]);
     return r;
 }
 
-fn to_mont(c: const Curve&, a: const u32[:]) -> u32[..12] { fmul(c, a, c.r2p[..]) }
+fn to_mont(c: const Curve&, a: const u32[:]) -> u32[..17] { fmul(c, a, c.r2p[..]) }
 
-fn from_mont(c: const Curve&, a: const u32[:]) -> u32[..12] {
+fn from_mont(c: const Curve&, a: const u32[:]) -> u32[..17] {
     var one = ec_zero(c);
     one[0] = 1;
     return fmul(c, a, one[..]);
 }
 
 // 1/a mod p in normal form (0 for 0).
-fn finv(c: const Curve&, a: const u32[:]) -> u32[..12] {
+fn finv(c: const Curve&, a: const u32[:]) -> u32[..17] {
     var r = ec_zero(c);
     mont_modexp(r[..], a, c.pm2[..], c.p[..], c.p0i, c.r2p[..]);
     return r;
 }
 
 // Arithmetic mod n, in normal form.
-fn nmul(c: const Curve&, a: const u32[:], b: const u32[:]) -> u32[..12] {
+fn nmul(c: const Curve&, a: const u32[:], b: const u32[:]) -> u32[..17] {
     var r = ec_zero(c);
     var t1 = ec_zero(c);
-    var t: u32[14] = [0; 14];
+    var t: u32[19] = [0; 19];
     mont_mul(t1[..], a, b, c.n[..], c.n0i, t[..c.nl + 2]);
     mont_mul(r[..], t1[..], c.r2n[..], c.n[..], c.n0i, t[..c.nl + 2]);
     return r;
 }
 
-fn nadd(c: const Curve&, a: const u32[:], b: const u32[:]) -> u32[..12] {
+fn nadd(c: const Curve&, a: const u32[:], b: const u32[:]) -> u32[..17] {
     var r = ec_zero(c);
     ct_mod_add(r[..], a, b, c.n[..]);
     return r;
 }
 
-fn ninv(c: const Curve&, a: const u32[:]) -> u32[..12] {
+fn ninv(c: const Curve&, a: const u32[:]) -> u32[..17] {
     var r = ec_zero(c);
     mont_modexp(r[..], a, c.nm2[..], c.n[..], c.n0i, c.r2n[..]);
     return r;
 }
 
 // x mod n for x < 2n, as any value below p is (p < 2n on both curves).
-fn nreduce(c: const Curve&, x: const u32[:]) -> u32[..12] {
+fn nreduce(c: const Curve&, x: const u32[:]) -> u32[..17] {
     var r = ec_zero(c);
     for i in c.nl { r[i] = x[i]; }
     ct_cond_sub(r[..], 0, c.n[..]);
     return r;
 }
 
-fn ec_curve(nl: i64, hash: i64, p: const u8[:], n: const u8[:], b: const u8[:],
+fn ec_curve(nl: i64, bits: i64, hash: i64, p: const u8[:], n: const u8[:], b: const u8[:],
             gx: const u8[:], gy: const u8[:]) -> Curve {
     var c = Curve {
-        nl: nl, len: 4 * nl, hash: hash,
+        nl: nl, len: (bits + 7) / 8, bits: bits, hash: hash,
         p: [], p0i: 0, r2p: [], pm2: [], n: [], n0i: 0, r2n: [], nm2: [],
         b: [], gx: [], gy: [],
     };
@@ -131,7 +132,7 @@ fn ec_curve(nl: i64, hash: i64, p: const u8[:], n: const u8[:], b: const u8[:],
     c.r2n = ec_zero(c);
     mont_r2(c.r2n[..], c.n[..]);
     c.pm2 = c.p;
-    c.pm2[0] -= 2;                               // both primes end in ...ff
+    c.pm2[0] -= 2;                               // the primes end in ...ff, the orders in more than 1
     c.nm2 = c.n;
     c.nm2[0] -= 2;
     c.b = to_mont(c, ec_hex(c, b)[..]);
@@ -142,7 +143,7 @@ fn ec_curve(nl: i64, hash: i64, p: const u8[:], n: const u8[:], b: const u8[:],
 
 // secp256r1 (FIPS 186-4 D.1.2.3), signing with SHA-256.
 fn p256() -> Curve {
-    ec_curve(8, 256,
+    ec_curve(8, 256, 256,
         "ffffffff00000001000000000000000000000000ffffffffffffffffffffffff",
         "ffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551",
         "5ac635d8aa3a93e7b3ebbd55769886bc651d06b0cc53b0f63bce3c3e27d2604b",
@@ -152,12 +153,22 @@ fn p256() -> Curve {
 
 // secp384r1 (FIPS 186-4 D.1.2.4), signing with SHA-384.
 fn p384() -> Curve {
-    ec_curve(12, 384,
+    ec_curve(12, 384, 384,
         "fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeffffffff0000000000000000ffffffff",
         "ffffffffffffffffffffffffffffffffffffffffffffffffc7634d81f4372ddf581a0db248b0a77aecec196accc52973",
         "b3312fa7e23ee7e4988e056be3f82d19181d9c6efe8141120314088f5013875ac656398d8a2ed19d2a85c8edd3ec2aef",
         "aa87ca22be8b05378eb1c71ef320ad746e1d3b628ba79b9859f741e082542a385502f25dbf55296c3a545e3872760ab7",
         "3617de4a96262c6f5d9e98bf9292dc29f8f41dbd289a147ce9da3113b5f0b8c00a60b1ce1d7e819d7a431d7c90ea0e5f")
+}
+
+// secp521r1 (FIPS 186-4 D.1.2.5), signing with SHA-512.
+fn p521() -> Curve {
+    ec_curve(17, 521, 512,
+        "01ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "01fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffa51868783bf2f966b7fcc0148f709a5d03bb5c9b8899c47aebb6fb71e91386409",
+        "0051953eb9618e1c9a1f929a21a0b68540eea2da725b99b315f3b8b489918ef109e156193951ec7e937b1652c0bd3bb1bf073573df883d2c34f1ef451fd46b503f00",
+        "00c6858e06b70404e9cd9e3ecb662395b4429c648139053fb521f828af606b4d3dbaa14b5e77efe75928fe1dc127a2ffa8de3348b3c1856a429bf97e7e31c2e5bd66",
+        "011839296a789a3bc0045c8a5fb42c7d1bd998f54449579b446817afbd17273e662c97ee72995ef42640c550b9013fad0761353c7086a272c24088be94769fd16650")
 }
 
 fn ec_infinity(c: const Curve&) -> EcPoint {
@@ -252,7 +263,7 @@ fn ec_mul(c: const Curve&, k: const u32[:], p: const EcPoint&) -> EcPoint {
 }
 
 // Affine x and y in normal form, and false for infinity.
-fn ec_affine(c: const Curve&, p: const EcPoint&) -> u32[..12], u32[..12], bool {
+fn ec_affine(c: const Curve&, p: const EcPoint&) -> u32[..17], u32[..17], bool {
     let z = from_mont(c, p.z[..]);
     let ok = ct_is_zero(z[..]) == 0;
     let zi = to_mont(c, finv(c, z[..])[..]);
@@ -302,7 +313,7 @@ fn ec_decode(c: const Curve&, s: const u8[:]) -> EcPoint, bool {
 }
 
 // A private scalar from its big-endian bytes; false unless 1 <= k < n.
-fn ec_scalar(c: const Curve&, sk: const u8[:]) -> u32[..12], bool {
+fn ec_scalar(c: const Curve&, sk: const u8[:]) -> u32[..17], bool {
     var k = ec_zero(c);
     if sk.len != c.len { return k, false; }
     limbs_from_be(k[..], sk);
@@ -346,11 +357,20 @@ fn ecdh_shared(c: const Curve&, sk: const u8[:], peer: const u8[:]) -> u8[>..], 
     return out, true;
 }
 
-// The leftmost bits of a digest as a scalar (bits2int of RFC 6979 §2.3.2);
-// the orders here are whole bytes long, so this takes whole bytes.
-fn ec_bits2int(c: const Curve&, h: const u8[:]) -> u32[..12] {
+// The leftmost bits of a string, as many as the order has, as a scalar
+// (bits2int of RFC 6979 §2.3.2).
+fn ec_bits2int(c: const Curve&, h: const u8[:]) -> u32[..17] {
     var e = ec_zero(c);
-    limbs_from_be(e[..], h[..::min(h.len, c.len)]);
+    let nb = ::min(h.len, c.len);
+    limbs_from_be(e[..], h[..nb]);
+    let excess = 8 * nb - c.bits;
+    if excess > 0 {
+        let sh: u32 = excess as! u32;
+        for i in c.nl {
+            let hi: u32 = if i + 1 < c.nl { e[i + 1] << (32 - sh) } else { 0 };
+            e[i] = (e[i] >> sh) | hi;
+        }
+    }
     return e;
 }
 
@@ -384,9 +404,15 @@ fn ecdsa_sign(c: const Curve&, sk: const u8[:], msg: const u8[:]) -> u8[>..] {
     }
     let g = ec_generator(c);
     loop {
-        let nv = hmac(c.hash, k, v);             // hl == len, so one block
-        v = copy(nv);
-        let kk, okk = ec_scalar(c, v[..c.len]);
+        // T: HMAC blocks until there are as many bits as the order has.
+        var tt: u8[>..] = [];
+        while tt.len < c.len {
+            let nv = hmac(c.hash, k, v);
+            v = copy(nv);
+            tt.append(v);
+        }
+        let kk = ec_bits2int(c, tt);
+        let okk = (ct_lt(kk[..], c.n[..]) & (ct_is_zero(kk[..]) ^ 1)) == 1;
         if okk {
             let kg = ec_mul(c, kk[..], g);
             let x, y, ok = ec_affine(c, kg);
@@ -449,14 +475,15 @@ fn der_uint(out: u8[>..]&, v: const u8[:]) {
 }
 
 fn ecdsa_sig_to_der(raw: const u8[:]) -> u8[>..] {
-    assert(raw.len % 2 == 0 && raw.len <= 96);
+    assert(raw.len % 2 == 0 && raw.len <= 132);
     let half = raw.len / 2;
     var body: u8[>..] = [];
     der_uint(body, raw[..half]);
     der_uint(body, raw[half..]);
     var out: u8[>..] = [];
     out.push(0x30);
-    out.push(body.len as! u8);                  // under 128 for these sizes
+    if body.len >= 128 { out.push(0x81); }      // P-521's can pass 127 bytes
+    out.push(body.len as! u8);
     out.append(body);
     return out;
 }
@@ -483,9 +510,17 @@ fn der_read_uint(der: const u8[:], at: i64, out: u8[:]) -> i64 {
 fn ecdsa_sig_from_der(c: const Curve&, der: const u8[:]) -> u8[>..], bool {
     var raw: u8[>..] = [];
     raw.resize(2 * c.len, 0);
-    var ok = der.len >= 2 && der[0] == 0x30 && der[1] < 128 && der[1] as i64 + 2 == der.len;
+    // The SEQUENCE's length in the short form, or 0x81 and a byte >= 128.
+    var hdr = 2;
+    var ok = der.len >= 2 && der[0] == 0x30;
+    if ok && der[1] == 0x81 {
+        ok = der.len >= 3 && der[2] >= 128 && der[2] as i64 + 3 == der.len;
+        hdr = 3;
+    } else if ok {
+        ok = der[1] < 128 && der[1] as i64 + 2 == der.len;
+    }
     if ok {
-        let mid = der_read_uint(der, 2, raw[..c.len]);
+        let mid = der_read_uint(der, hdr, raw[..c.len]);
         ok = mid >= 0 && der_read_uint(der, mid, raw[c.len..]) == der.len;
     }
     if !ok { raw.clear(); }
