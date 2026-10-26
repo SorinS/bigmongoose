@@ -33,7 +33,8 @@ language, written in Goose: a foundation for cryptography.
 - **`bignum.sha1`**: SHA-1, for what still needs it.
 - **`bignum.sha3`**: SHA3-224/256/384/512, SHAKE128/256 and cSHAKE.
 - **`bignum.md5`**: MD5, for what still needs it.
-- **`bignum.blake2`**: BLAKE2b and BLAKE2s, keyed or not.
+- **`bignum.blake2`**: BLAKE2b and BLAKE2s, keyed or not, and the BLAKE2Xb and
+  BLAKE2Xs XOFs.
 - **`bignum.hmac`**: one-shot hashing, HMAC, HKDF and MGF1 over any of them.
 - **`bignum.kdf`**: PBKDF2 and scrypt.
 - **`bignum.argon2`**: Argon2id, Argon2i and Argon2d (RFC 9106).
@@ -282,12 +283,21 @@ Every hash comes one-shot or streaming (`*_init`, `*_update`, `*_final`):
   `sha3.NewCSHAKE128/256`;
 - `md5`;
 - `blake2b(data, outlen = 64, key = "")` and `blake2s(data, outlen = 32,
-  key = "")`, keyed when a key is given.
+  key = "")`, keyed when a key is given;
+- `blake2xb(data, n, key = "")` and `blake2xs`, BLAKE2X as Go's
+  `blake2b.NewXOF` and `blake2s.NewXOF`. The output length n is part of
+  the hash. To stream, use `blake2xb_init(n, key)`, `blake2xb_update`,
+  then `blake2xb_read(x, out) -> count` as often as needed. n = 0 means an
+  unknown length, read up to 256 GiB (BLAKE2Xb) or 128 GiB (BLAKE2Xs).
 
 The generic functions name a hash by an id: 128 (MD5), 160 (SHA-1), 224, 256, 384,
-512, `HASH_SHA512_224`, `HASH_SHA512_256` and `HASH_SHA3_224` through
-`HASH_SHA3_512`. They include `hash_bits(id, data)`, HMAC, HKDF, MGF1, and
-RSA PKCS #1 v1.5 and PSS signatures. `hmac(id, key, msg)` and the `hmac_sha256/384/512` shortcuts cover HMAC.
+512, `HASH_SHA512_224`, `HASH_SHA512_256`, `HASH_SHA3_224` through
+`HASH_SHA3_512`, and `HASH_BLAKE2B_256`, `_384`, `_512` and
+`HASH_BLAKE2S_256` (Go's `crypto.BLAKE2b_256` and so on). They include
+`hash_bits(id, data)`, HMAC, HKDF, PBKDF2, MGF1, RSA PSS and OAEP, and
+ECDSA over a digest (`ecdsa_sign_digest`). RSA PKCS #1 v1.5 signatures
+take MD5, SHA-1, SHA-2 and SHA-3 but not BLAKE2, which has no DigestInfo
+(as in Go); verifying with an unsupported hash returns false. `hmac(id, key, msg)` and the `hmac_sha256/384/512` shortcuts cover HMAC.
 `hkdf_extract`, `hkdf_expand` and `hkdf` cover HKDF. TLS 1.3's HKDF-Expand-Label is a
 few lines on top of `hkdf_expand` and is not included.
 
@@ -421,6 +431,12 @@ python3 scripts/gen_vectors.py          # regenerate test/vectors from Python's 
   and openssl). On one 2048-bit key: OAEP over SHA-1, SHA-2 and SHA-3,
   and PKCS #1 v1.5 encryption, including openssl's own ciphertexts, with
   malformed padding refused and the session-key form left untouched.
+- `blake2_vectors`: BLAKE2Xb and BLAKE2Xs, with the reference KATs at
+  every length from 1 to 256 and random ones, both one-shot and read in
+  uneven pieces. HMAC, HKDF and PBKDF2 over each BLAKE2 id; RSA-PSS over
+  BLAKE2, and PKCS #1 v1.5 over MD5 (checked by openssl). Go's x/crypto
+  and crypto/* agreed with every line when the file was made. Also
+  ECDSA over BLAKE2 digests.
 
 `scripts/crypto_vectors.py` holds the Python transcriptions behind the
 AES, GCM, ChaCha20-Poly1305, RSA, EC and Ed25519 vectors (hashes, HMAC and HKDF come from

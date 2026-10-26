@@ -15,6 +15,7 @@ import sha512;
 import sha1;
 import sha3;
 import md5;
+import blake2;
 
 // The hash states PBKDF2 runs, by type: absorb, and finish into out
 // (hash_len bytes).
@@ -23,6 +24,8 @@ fn kdf_update(s: Sha512&, d: const u8[:]) { sha512_update(s, d); }
 fn kdf_update(s: Sha1&, d: const u8[:]) { sha1_update(s, d); }
 fn kdf_update(s: Md5&, d: const u8[:]) { md5_update(s, d); }
 fn kdf_update(s: Keccak&, d: const u8[:]) { sha3_update(s, d); }
+fn kdf_update(s: Blake2b&, d: const u8[:]) { blake2b_update(s, d); }
+fn kdf_update(s: Blake2s&, d: const u8[:]) { blake2s_update(s, d); }
 
 fn kdf_final(s: Sha256&, bits: i64, out: u8[:]) {
     if bits == 224 {
@@ -47,6 +50,14 @@ fn kdf_final(s: Md5&, bits: i64, out: u8[:]) {
 }
 fn kdf_final(s: Keccak&, bits: i64, out: u8[:]) {
     let h = sha3_final(s);
+    for i in h.len { out[i] = h[i]; }
+}
+fn kdf_final(s: Blake2b&, bits: i64, out: u8[:]) {
+    let h = blake2b_final(s);
+    for i in h.len { out[i] = h[i]; }
+}
+fn kdf_final(s: Blake2s&, bits: i64, out: u8[:]) {
+    let h = blake2s_final(s);
     for i in h.len { out[i] = h[i]; }
 }
 
@@ -105,6 +116,8 @@ fn pbkdf2(bits: i64, password: const u8[:], salt: const u8[:], iter: i64, len: i
     if bits == 160 { return pbkdf2_with(sha1_init(), bits, password, salt, iter, len); }
     if bits == 128 { return pbkdf2_with(md5_init(), bits, password, salt, iter, len); }
     if bits > 3000 && bits < 4000 { return pbkdf2_with(sha3_init(bits - 3000), bits, password, salt, iter, len); }
+    if is_blake2b(bits) { return pbkdf2_with(blake2b_init(hash_len(bits)), bits, password, salt, iter, len); }
+    if bits == HASH_BLAKE2S_256 { return pbkdf2_with(blake2s_init(), bits, password, salt, iter, len); }
     let s0 = if bits == 384 { sha384_init() } else if bits == 512 { sha512_init() }
              else if bits == HASH_SHA512_224 { sha512_224_init() } else { sha512_256_init() };
     assert(bits == 384 || bits == 512 || bits == HASH_SHA512_224 || bits == HASH_SHA512_256);

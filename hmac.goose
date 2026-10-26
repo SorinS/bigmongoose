@@ -1,8 +1,9 @@
 // bignum.hmac: one-shot hashing, HMAC (RFC 2104), HKDF (RFC 5869) and
 // MGF1 over any of the package's hashes, named by an id: 128 for MD5, 160
 // for SHA-1, 224, 256, 384 and 512 for SHA-2, HASH_SHA512_224 and
-// HASH_SHA512_256, and HASH_SHA3_224 through HASH_SHA3_512. Most callers
-// use 256 or 384, the key derivation of TLS 1.3.
+// HASH_SHA512_256, HASH_SHA3_224 through HASH_SHA3_512, and
+// HASH_BLAKE2B_256, _384, _512 and HASH_BLAKE2S_256 (unkeyed). Most
+// callers use 256 or 384, the key derivation of TLS 1.3.
 
 namespace bignum;
 
@@ -12,6 +13,7 @@ import sha512;
 import sha1;
 import sha3;
 import md5;
+import blake2;
 
 let HASH_MD5: i64 = 128;
 let HASH_SHA1: i64 = 160;
@@ -25,18 +27,26 @@ let HASH_SHA3_224: i64 = 3224;
 let HASH_SHA3_256: i64 = 3256;
 let HASH_SHA3_384: i64 = 3384;
 let HASH_SHA3_512: i64 = 3512;
+let HASH_BLAKE2B_256: i64 = 2256;
+let HASH_BLAKE2B_384: i64 = 2384;
+let HASH_BLAKE2B_512: i64 = 2512;
+let HASH_BLAKE2S_256: i64 = 1256;
+
+fn is_blake2b(bits: i64) -> bool { bits == HASH_BLAKE2B_256 || bits == HASH_BLAKE2B_384 || bits == HASH_BLAKE2B_512 }
 
 fn hash_len(bits: i64) -> i64 {
     if bits == HASH_SHA512_224 || bits == HASH_SHA3_224 { return 28; }
     if bits == HASH_SHA512_256 || bits == HASH_SHA3_256 { return 32; }
     if bits == HASH_SHA3_384 { return 48; }
     if bits == HASH_SHA3_512 { return 64; }
+    if is_blake2b(bits) { return (bits - 2000) / 8; }
+    if bits == HASH_BLAKE2S_256 { return 32; }
     return bits / 8;
 }
 
 // The block size HMAC pads its key to.
 fn hash_block(bits: i64) -> i64 {
-    if bits == 128 || bits == 160 || bits == 224 || bits == 256 { return 64; }
+    if bits == 128 || bits == 160 || bits == 224 || bits == 256 || bits == HASH_BLAKE2S_256 { return 64; }
     if bits > 3000 && bits < 4000 { return 200 - 2 * hash_len(bits); }
     return 128;
 }
@@ -64,6 +74,16 @@ fn hash2(bits: i64, a: const u8[:], b: const u8[:]) -> u8[>..] {
         sha3_update(s, a);
         sha3_update(s, b);
         out = sha3_final(s);
+    } else if is_blake2b(bits) {
+        var s = blake2b_init(hash_len(bits));
+        blake2b_update(s, a);
+        blake2b_update(s, b);
+        out = blake2b_final(s);
+    } else if bits == HASH_BLAKE2S_256 {
+        var s = blake2s_init();
+        blake2s_update(s, a);
+        blake2s_update(s, b);
+        out = blake2s_final(s);
     } else {
         var s = if bits == 384 { sha384_init() } else if bits == 512 { sha512_init() }
                 else if bits == HASH_SHA512_224 { sha512_224_init() } else { sha512_256_init() };

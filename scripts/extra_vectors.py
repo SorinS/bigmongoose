@@ -1,7 +1,8 @@
 """Vectors for the primitives added after crypto_vectors.py: P-224, the
 AES and DES block modes, MD5, DES and 3DES, RC4, BLAKE2, PBKDF2, scrypt,
 Argon2, XChaCha20-Poly1305, Ed25519ctx and Ed25519ph, RSA PKCS #1 v1.5
-encryption and OAEP over other hashes, and cSHAKE.
+encryption and OAEP over other hashes, cSHAKE, and BLAKE2X and BLAKE2 as
+a hash for HMAC, HKDF and PBKDF2 (blake2.txt, from a third random stream).
 
 hashlib supplies MD5, BLAKE2, PBKDF2 and scrypt. The rest are
 transcriptions of their standards, each checked here against the vectors
@@ -553,6 +554,201 @@ def extra_vectors(chk):
     return out
 
 
+# --- BLAKE2X, and BLAKE2 under HMAC, HKDF and PBKDF2 ------------------------
+
+def blake2_raw(wide, cfg, data, key=b""):
+    """BLAKE2b (wide) or BLAKE2s from a whole parameter block, which
+    hashlib can't take (it refuses BLAKE2X's depth of 0)."""
+    ws, bb, rounds, rot = (8, 128, 12, (32, 24, 16, 63)) if wide else (4, 64, 10, (16, 12, 8, 7))
+    bits = 8 * ws
+    mask = (1 << bits) - 1
+    iv = [0x6a09e667f3bcc908, 0xbb67ae8584caa73b, 0x3c6ef372fe94f82b, 0xa54ff53a5f1d36f1,
+          0x510e527fade682d1, 0x9b05688c2b3e6c1f, 0x1f83d9abfb41bd6b, 0x5be0cd19137e2179]
+    if not wide:
+        iv = [v >> 32 for v in iv]
+    sigma = [[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+             [14, 10, 4, 8, 9, 15, 13, 6, 1, 12, 0, 2, 11, 7, 5, 3],
+             [11, 8, 12, 0, 5, 2, 15, 13, 10, 14, 3, 6, 7, 1, 9, 4],
+             [7, 9, 3, 1, 13, 12, 11, 14, 2, 6, 5, 10, 4, 0, 15, 8],
+             [9, 0, 5, 7, 2, 4, 10, 15, 14, 1, 11, 12, 6, 8, 3, 13],
+             [2, 12, 6, 10, 0, 11, 8, 3, 4, 13, 7, 5, 15, 14, 1, 9],
+             [12, 5, 1, 15, 14, 13, 4, 10, 0, 7, 6, 3, 9, 2, 8, 11],
+             [13, 11, 7, 14, 12, 1, 3, 9, 5, 0, 15, 4, 8, 6, 2, 10],
+             [6, 15, 14, 9, 11, 3, 0, 8, 12, 2, 13, 7, 1, 4, 10, 5],
+             [10, 2, 8, 4, 7, 6, 1, 5, 15, 11, 9, 14, 3, 12, 13, 0]]
+    h = [iv[i] ^ int.from_bytes(cfg[ws * i:ws * i + ws], "little") for i in range(8)]
+
+    def rotr(x, n):
+        return ((x >> n) | (x << (bits - n))) & mask
+
+    def compress(blk, t, last):
+        m = [int.from_bytes(blk[ws * i:ws * i + ws], "little") for i in range(16)]
+        v = h + iv
+        v[12] ^= t & mask
+        v[13] ^= t >> bits
+        if last:
+            v[14] ^= mask
+        for r in range(rounds):
+            sg = sigma[r % 10]
+            for i, (a, b, c, d) in enumerate(((0, 4, 8, 12), (1, 5, 9, 13), (2, 6, 10, 14), (3, 7, 11, 15),
+                                              (0, 5, 10, 15), (1, 6, 11, 12), (2, 7, 8, 13), (3, 4, 9, 14))):
+                x, y = m[sg[2 * i]], m[sg[2 * i + 1]]
+                v[a] = (v[a] + v[b] + x) & mask; v[d] = rotr(v[d] ^ v[a], rot[0])
+                v[c] = (v[c] + v[d]) & mask;     v[b] = rotr(v[b] ^ v[c], rot[1])
+                v[a] = (v[a] + v[b] + y) & mask; v[d] = rotr(v[d] ^ v[a], rot[2])
+                v[c] = (v[c] + v[d]) & mask;     v[b] = rotr(v[b] ^ v[c], rot[3])
+        for i in range(8):
+            h[i] ^= v[i] ^ v[8 + i]
+
+    if key:
+        data = key.ljust(bb, b"\0") + data
+    t = 0
+    while len(data) > bb:
+        t += bb
+        compress(data[:bb], t, False)
+        data = data[bb:]
+    compress(data.ljust(bb, b"\0"), t + len(data), True)
+    return b"".join(x.to_bytes(ws, "little") for x in h)[:cfg[0]]
+
+
+def blake2x(wide, data, n, key=b"", read=None):
+    """BLAKE2Xb or BLAKE2Xs: n bytes, or `read` bytes of the unknown-length
+    form when n is 0."""
+    size = 64 if wide else 32
+    length = n or ((1 << 32) - 1 if wide else (1 << 16) - 1)
+    cfg = bytearray(size)
+    cfg[0], cfg[1], cfg[2], cfg[3] = size, len(key), 1, 1
+    if wide:
+        cfg[12:16] = length.to_bytes(4, "little")
+    else:
+        cfg[12:14] = length.to_bytes(2, "little")
+    root = blake2_raw(wide, cfg, data, key)
+    total = n or read
+    out = b""
+    node = 0
+    while len(out) < total:
+        c = bytearray(size)
+        c[0] = min(size, total - len(out)) if n else size
+        c[4] = size                                       # leaf length
+        c[8:12] = node.to_bytes(4, "little")
+        if wide:
+            c[12:16] = length.to_bytes(4, "little")
+            c[17] = size                                  # inner length
+        else:
+            c[12:14] = length.to_bytes(2, "little")
+            c[15] = size
+        out += blake2_raw(wide, c, root)
+        node += 1
+    return out[:total]
+
+
+# The transcription against hashlib, then against the reference KATs (as
+# Go's blake2b and blake2s tests carry them: the key 00..3f or 00..1f,
+# the input 00..ff, and output lengths 1 to 256).
+for _m in (b"", b"abc", bytes(range(200))):
+    for _k in (b"", b"key"):
+        assert blake2_raw(True, bytes([64, len(_k), 1, 1]) + bytes(60), _m, _k) == hashlib.blake2b(_m, key=_k).digest()
+        assert blake2_raw(False, bytes([20, len(_k), 1, 1]) + bytes(28), _m, _k) == \
+            hashlib.blake2s(_m, digest_size=20, key=_k).digest()
+_KB, _KS, _IN = bytes(range(64)), bytes(range(32)), bytes(range(256))
+assert blake2x(True, _IN, 1, _KB).hex() == "64"
+assert blake2x(True, _IN, 32, _KB).hex() == "29f6bb55de7f8868e053176c878c9fe6c2055c4c5413b51ab0386c277fdbac75"
+assert blake2x(True, _IN, 64, _KB).hex() == \
+    "4324561d76c370ef35ac36a4adf8f3773a50d86504bd284f71f7ce9e2bc4c1f1d34a7fb2d67561d101955d448b67577eb30dfee96a95c7f921ef53e20be8bc44"
+assert blake2x(True, _IN, 0, _KB, 64).hex() == \
+    "3dbba8516da76bf7330055c66ea36cf1005e92714262b24d9710f51d9e126406e1bcd6497059f9331f1091c3634b695428d475ed432f987040575520a1c29f5e"
+assert blake2x(False, _IN, 2, _KS).hex() == "5196"
+assert blake2x(False, _IN, 33, _KS).hex() == "7dce710a20f42ab687ec6ea83b53faaa418229ce0d5a2ff2a5e66defb0b65c03c9"
+assert blake2x(False, _IN, 0, _KS, 64).hex() == \
+    "2a9a6977d915a2c4dd07dbcafe1918bf1682e56d9c8e567ecd19bfd7cd93528833c764d12b34a5e2a219c9fd463dab45e972c5574d73f45de5b2e23af72530d8"
+
+BLAKE2_HASHES = {2256: lambda d=b"": hashlib.blake2b(d, digest_size=32), 2384: lambda d=b"": hashlib.blake2b(d, digest_size=48),
+                 2512: hashlib.blake2b, 1256: hashlib.blake2s}
+
+
+def hkdf_h(new, salt, ikm, info, n):
+    prk = hmac.new(salt or bytes(new().digest_size), ikm, new).digest()
+    out, t, i = b"", b"", 1
+    while len(out) < n:
+        t = hmac.new(prk, t + info + bytes([i]), new).digest()
+        out += t
+        i += 1
+    return out[:n]
+
+
+def blake2_vectors(chk):
+    rng2 = random.Random(20261026_3)
+
+    def rb(n):
+        return bytes(rng2.getrandbits(8) for _ in range(n))
+
+    out = []
+    # The KATs whole, the unknown-length outputs, then random ones.
+    for wide, name, key in ((True, "blake2xb", _KB), (False, "blake2xs", _KS)):
+        for n in range(1, 257):
+            out.append(f"{name} {n} {key.hex()} {_IN.hex()} {blake2x(wide, _IN, n, key).hex()}")
+        out.append(f"{name} 0 {key.hex()} {_IN.hex()} {blake2x(wide, _IN, 0, key, 64).hex()}")
+        for t in range(12):
+            m = rb(rng2.choice([0, 1, 31, 64, 65, 128, 129, 500]))
+            k = rb(rng2.choice([0, 0, 1, 16, len(key)]))
+            n = rng2.choice([0, 0, 1, 63, 64, 65, 300, 1000, 4097])
+            got = blake2x(wide, m, n, k, rng2.choice([1, 64, 200, 3000]))
+            out.append(f"{name} {n} {hx(k)} {hx(m)} {got.hex()}")
+    for hid, new in BLAKE2_HASHES.items():
+        for t in range(4):
+            k, m = rb(rng2.choice([0, 16, 64, 65, 129, 200])), rb(rng2.choice([0, 3, 100, 300]))
+            out.append(f"hmac {hid} {hx(k)} {hx(m)} {hmac.new(k, m, new).hexdigest()}")
+        for t in range(3):
+            salt, ikm, info = rb(rng2.choice([0, 13, 32])), rb(rng2.choice([1, 22, 80])), rb(rng2.choice([0, 10]))
+            n = rng2.choice([1, 32, 42, 100, 255])
+            out.append(f"hkdf {hid} {hx(salt)} {hx(ikm)} {hx(info)} {n} {hkdf_h(new, salt, ikm, info, n).hex()}")
+        for t in range(3):
+            pw, salt = rb(rng2.choice([0, 8, 100, 200])), rb(rng2.choice([0, 16, 70]))
+            it, n = rng2.choice([1, 2, 7, 100]), rng2.choice([1, 16, 33, 64, 100])
+            dk = cv_pbkdf2(new, pw, salt, it, n)
+            out.append(f"pbkdf2 {hid} {hx(pw)} {hx(salt)} {it} {n} {dk.hex()}")
+    # RSA-PSS over BLAKE2b-512 and BLAKE2s-256, and PKCS #1 v1.5 over MD5
+    # (BLAKE2 has no DigestInfo), on a 1024-bit key of this stream's own.
+    saved = cv.rng
+    cv.rng = rng2
+    key = cv.rsa_key(512, 512, 65537)
+    cv.rng = saved
+    out.append("key " + " ".join(format(key[x], "x") for x in ("n", "e", "d", "p", "q")))
+    pem = chk.key(key) if chk else None
+    for hid, hn in ((2512, "blake2b"), (1256, "blake2s")):
+        for t in range(3):
+            msg, salt = rb(rng2.choice([0, 5, 200])), rb(rng2.choice([0, 20, 32]))
+            sig = cv.pss_sign(key, msg, salt, hn)        # openssl refuses RSA over BLAKE2
+            out.append(f"pss {hid} {hx(salt)} {hx(msg)} {sig.hex()}")
+    md5_di = bytes.fromhex("3020300c06082a864886f70d020505000410")
+    for t in range(3):
+        msg = rb(rng2.choice([0, 7, 100]))
+        k = k_of(key)
+        tt = md5_di + hashlib.md5(msg).digest()
+        em = b"\0\1" + b"\xff" * (k - len(tt) - 3) + b"\0" + tt
+        sig = i2osp(pow(int.from_bytes(em, "big"), key["d"], key["n"]), k)
+        if chk:
+            chk.verify(pem, msg, sig, None, "md5", hashlib.md5(msg).digest())
+        out.append(f"pkcs1 128 {hx(msg)} {sig.hex()}")
+    return out
+
+
+def cv_pbkdf2(new, pw, salt, it, n):
+    out, i = b"", 1
+    while len(out) < n:
+        u = hmac.new(pw, salt + i.to_bytes(4, "big"), new).digest()
+        t = u
+        for _ in range(it - 1):
+            u = hmac.new(pw, u, new).digest()
+            t = xor(t, u)
+        out += t
+        i += 1
+    return out[:n]
+
+
+assert cv_pbkdf2(hashlib.sha256, b"passwd", b"salt", 3, 50) == hashlib.pbkdf2_hmac("sha256", b"passwd", b"salt", 3, 50)
+
+
 # --- driver -----------------------------------------------------------------
 
 def generate():
@@ -562,6 +758,7 @@ def generate():
     out["legacy.txt"] = legacy_vectors(chk)
     out["kdf.txt"] = kdf_vectors(chk)
     out["extra.txt"] = extra_vectors(chk)
+    out["blake2.txt"] = blake2_vectors(chk)
     if chk:
         print(f"openssl agreed on {chk.count} more vectors")
         chk.done()

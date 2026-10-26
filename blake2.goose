@@ -4,6 +4,17 @@
 // Streaming: blake2b_init, blake2b_update any number of times, then
 // blake2b_final; or blake2b(data). Argon2 (bignum.argon2) is built on
 // BLAKE2b. Constant time.
+//
+// BLAKE2Xb and BLAKE2Xs (blake2.net/blake2x.pdf) are the extendable-output
+// forms, as Go's blake2b.NewXOF and blake2s.NewXOF: the output length is
+// fixed up front (up to 2^32 - 2 or 2^16 - 2 bytes) and is part of the
+// hash, or left unknown with 0, which allows up to 256 GiB or 128 GiB.
+// blake2xb_init, blake2xb_update, then blake2xb_read for as many pieces of
+// output as wanted; or blake2xb(data, n).
+//
+// As hashes for HMAC, HKDF, PBKDF2 and signatures, bignum.hmac names
+// BLAKE2b-256, -384, -512 and BLAKE2s-256 (Go's crypto.BLAKE2b_256 and so
+// on), unkeyed.
 
 namespace bignum;
 
@@ -149,6 +160,17 @@ fn blake2b(data: const u8[:], outlen: i64 = 64, key: const u8[:] = "") -> u8[>..
     return blake2b_final(s);
 }
 
+// A state from a whole parameter block (64 bytes), unkeyed.
+fn blake2b_init_cfg(cfg: const u8[:]) -> Blake2b {
+    var s = Blake2b { h: BLAKE2B_IV, buf: [0; 128], used: 0, t: 0, outlen: cfg[0] };
+    for i in 8 {
+        var w: u64 = 0;
+        for k in 8 { w = w | (cfg[8 * i + k] as u64) << (8 * k); }
+        s.h[i] ^= w;
+    }
+    return s;
+}
+
 // A digest of outlen bytes (1..32), keyed when key is not empty (at most
 // 32 bytes).
 fn blake2s_init(outlen: i64 = 32, key: const u8[:] = "") -> Blake2s {
@@ -192,4 +214,140 @@ fn blake2s(data: const u8[:], outlen: i64 = 32, key: const u8[:] = "") -> u8[>..
     var s = blake2s_init(outlen, key);
     blake2s_update(s, data);
     return blake2s_final(s);
+}
+
+// A state from a whole parameter block (32 bytes), unkeyed.
+fn blake2s_init_cfg(cfg: const u8[:]) -> Blake2s {
+    var s = Blake2s { h: BLAKE2S_IV, buf: [0; 64], used: 0, t: 0, outlen: cfg[0] };
+    for i in 8 {
+        let b0: u32 = cfg[4 * i];
+        s.h[i] ^= b0 | (cfg[4 * i + 1] as u32) << 8 | (cfg[4 * i + 2] as u32) << 16 | (cfg[4 * i + 3] as u32) << 24;
+    }
+    return s;
+}
+
+// BLAKE2X: the root hash absorbs the input (its parameter block carries
+// the output length); output block i is then the hash of the root under a
+// parameter block with node offset i, and the last block's digest length
+// cut to what is left. `left` counts the output still to give, `off` the
+// next unread byte of blk (a whole block when blk is used up).
+struct Blake2xb { d: Blake2b, cfg: u8[64], root: u8[64], blk: u8[64], left: u64, off: i64, node: u32, reading: bool }
+struct Blake2xs { d: Blake2s, cfg: u8[32], root: u8[32], blk: u8[32], left: u64, off: i64, node: u32, reading: bool }
+
+let BLAKE2XB_UNKNOWN: u64 = 0xffffffff;
+let BLAKE2XS_UNKNOWN: u64 = 0xffff;
+
+// An XOF of n bytes, or of unknown length when n is 0, keyed when key is
+// not empty (at most 64 bytes).
+fn blake2xb_init(n: i64 = 0, key: const u8[:] = "") -> Blake2xb {
+    assert(n >= 0 && (n as! u64) < BLAKE2XB_UNKNOWN);
+    let len: u64 = if n == 0 { BLAKE2XB_UNKNOWN } else { n as! u64 };
+    var x = Blake2xb { d: blake2b_init(64, key), cfg: [0; 64], root: [0; 64], blk: [0; 64],
+                       left: if n == 0 { 64 << 32 } else { len }, off: 64, node: 0, reading: false };
+    x.d.h[1] ^= len << 32;
+    x.cfg[0] = 64;                               // digest length
+    x.cfg[4] = 64;                               // leaf length
+    for k in 4 { x.cfg[12 + k] = (len >> (8 * k)) as! u8; }
+    x.cfg[17] = 64;                              // inner hash length
+    return x;
+}
+
+fn blake2xb_update(x: Blake2xb&, data: const u8[:]) {
+    assert(!x.reading);
+    blake2b_update(x.d, data);
+}
+
+// Fills out with the next output; fewer bytes (the count is returned)
+// once the output runs out.
+fn blake2xb_read(x: Blake2xb&, out: u8[:]) -> i64 {
+    if !x.reading {
+        let r = blake2b_final(x.d);
+        for i in 64 { x.root[i] = r[i]; }
+        x.reading = true;
+    }
+    let n: i64 = if (out.len as! u64) > x.left { x.left as! i64 } else { out.len };
+    for i in n {
+        if x.off == 64 {
+            x.cfg[0] = if x.left < 64 { x.left as! u8 } else { 64 };
+            for k in 4 { x.cfg[8 + k] = (x.node >> (8 * k)) as! u8; }
+            x.node++;
+            var s = blake2b_init_cfg(x.cfg);
+            blake2b_update(s, x.root);
+            let b = blake2b_final(s);
+            for k in b.len { x.blk[k] = b[k]; }
+            x.off = 0;
+        }
+        out[i] = x.blk[x.off];
+        x.off++;
+        x.left--;
+    }
+    return n;
+}
+
+// n bytes (1..2^32 - 2) of BLAKE2Xb of data.
+fn blake2xb(data: const u8[:], n: i64, key: const u8[:] = "") -> u8[>..] {
+    assert(n >= 1);
+    var x = blake2xb_init(n, key);
+    blake2xb_update(x, data);
+    var out: u8[>..] = [];
+    out.resize(n, 0);
+    blake2xb_read(x, out);
+    return out;
+}
+
+// An XOF of n bytes, or of unknown length when n is 0, keyed when key is
+// not empty (at most 32 bytes).
+fn blake2xs_init(n: i64 = 0, key: const u8[:] = "") -> Blake2xs {
+    assert(n >= 0 && (n as! u64) < BLAKE2XS_UNKNOWN);
+    let len: u64 = if n == 0 { BLAKE2XS_UNKNOWN } else { n as! u64 };
+    var x = Blake2xs { d: blake2s_init(32, key), cfg: [0; 32], root: [0; 32], blk: [0; 32],
+                       left: if n == 0 { 32 << 32 } else { len }, off: 32, node: 0, reading: false };
+    x.d.h[3] ^= len as! u32;
+    x.cfg[0] = 32;                               // digest length
+    x.cfg[4] = 32;                               // leaf length
+    x.cfg[12] = len as! u8;
+    x.cfg[13] = (len >> 8) as! u8;
+    x.cfg[15] = 32;                              // inner hash length
+    return x;
+}
+
+fn blake2xs_update(x: Blake2xs&, data: const u8[:]) {
+    assert(!x.reading);
+    blake2s_update(x.d, data);
+}
+
+fn blake2xs_read(x: Blake2xs&, out: u8[:]) -> i64 {
+    if !x.reading {
+        let r = blake2s_final(x.d);
+        for i in 32 { x.root[i] = r[i]; }
+        x.reading = true;
+    }
+    let n: i64 = if (out.len as! u64) > x.left { x.left as! i64 } else { out.len };
+    for i in n {
+        if x.off == 32 {
+            x.cfg[0] = if x.left < 32 { x.left as! u8 } else { 32 };
+            for k in 4 { x.cfg[8 + k] = (x.node >> (8 * k)) as! u8; }
+            x.node++;
+            var s = blake2s_init_cfg(x.cfg);
+            blake2s_update(s, x.root);
+            let b = blake2s_final(s);
+            for k in b.len { x.blk[k] = b[k]; }
+            x.off = 0;
+        }
+        out[i] = x.blk[x.off];
+        x.off++;
+        x.left--;
+    }
+    return n;
+}
+
+// n bytes (1..65534) of BLAKE2Xs of data.
+fn blake2xs(data: const u8[:], n: i64, key: const u8[:] = "") -> u8[>..] {
+    assert(n >= 1);
+    var x = blake2xs_init(n, key);
+    blake2xs_update(x, data);
+    var out: u8[>..] = [];
+    out.resize(n, 0);
+    blake2xs_read(x, out);
+    return out;
 }

@@ -338,11 +338,23 @@ fn rsa_private_op(key: const RsaPrivateKey&, x: const u8[:]) -> u8[>..], bool {
 
 // PKCS #1 v1.5 signatures (RSASSA-PKCS1-v1_5).
 
-// The DER DigestInfo header for a hash (RFC 8017 §9.2): SHA-1's own OID,
-// or the NIST hash arc 2.16.840.1.101.3.4.2.n for SHA-2 and SHA-3.
+// The DER DigestInfo header for a hash (RFC 8017 §9.2): MD5's and SHA-1's
+// own OIDs, or the NIST hash arc 2.16.840.1.101.3.4.2.n for SHA-2 and
+// SHA-3. BLAKE2 has none, so it can't sign this way (as in Go).
+fn has_digest_info(bits: i64) -> bool {
+    bits == HASH_MD5 || bits == HASH_SHA1 || bits == 224 || bits == 256 || bits == 384 || bits == 512
+        || bits == HASH_SHA512_224 || bits == HASH_SHA512_256 || (bits > 3000 && bits < 4000)
+}
+
 fn digest_info(bits: i64) -> u8[>..] {
     var di: u8[>..] = [];
     let hl = hash_len(bits);
+    if bits == HASH_MD5 {
+        let md5_di: u8[18] = [0x30, 0x20, 0x30, 0x0c, 0x06, 0x08, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x02, 0x05,
+                              0x05, 0x00, 0x04, 0x10];
+        di.append(md5_di);
+        return di;
+    }
     if bits == HASH_SHA1 {
         let sha1_di: u8[15] = [0x30, 0x21, 0x30, 0x09, 0x06, 0x05, 0x2b, 0x0e, 0x03, 0x02, 0x1a, 0x05, 0x00, 0x04, 0x14];
         di.append(sha1_di);
@@ -352,6 +364,7 @@ fn digest_info(bits: i64) -> u8[>..] {
                   else if bits == HASH_SHA512_224 { 5 } else if bits == HASH_SHA512_256 { 6 }
                   else if bits == HASH_SHA3_224 { 7 } else if bits == HASH_SHA3_256 { 8 }
                   else if bits == HASH_SHA3_384 { 9 } else { 10 };
+    assert(has_digest_info(bits));
     let head: u8[17] = [0x30, (17 + hl) as! u8, 0x30, 0x0d, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03,
                         0x04, 0x02, arc, 0x05, 0x00];
     di.append(head);
@@ -386,7 +399,7 @@ fn rsa_sign_pkcs1(key: const RsaPrivateKey&, msg: const u8[:], hash: i64 = 256) 
 // The encoding is rebuilt and compared whole, rather than parsed.
 fn rsa_verify_pkcs1(key, msg: const u8[:], sig: const u8[:], hash: i64 = 256) -> bool {
     let m, ok = rsa_public_op(key, sig);
-    if !ok || m.len < hash_len(hash) + 30 { return false; }
+    if !ok || !has_digest_info(hash) || m.len < hash_len(hash) + 30 { return false; }
     var em: u8[>..] = [];
     em.resize(m.len, 0);
     pkcs1_encode(em, hash, hash_bits(hash, msg));
