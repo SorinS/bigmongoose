@@ -1,8 +1,8 @@
 // bignum.hmac: one-shot hashing, HMAC (RFC 2104), HKDF (RFC 5869) and
-// MGF1 over any of the package's hashes, named by an id: 160 for SHA-1,
-// 224, 256, 384 and 512 for SHA-2, HASH_SHA512_224 and HASH_SHA512_256,
-// and HASH_SHA3_224 through HASH_SHA3_512. Most callers use 256 or 384,
-// the key derivation of TLS 1.3.
+// MGF1 over any of the package's hashes, named by an id: 128 for MD5, 160
+// for SHA-1, 224, 256, 384 and 512 for SHA-2, HASH_SHA512_224 and
+// HASH_SHA512_256, and HASH_SHA3_224 through HASH_SHA3_512. Most callers
+// use 256 or 384, the key derivation of TLS 1.3.
 
 namespace bignum;
 
@@ -11,7 +11,9 @@ import sha256;
 import sha512;
 import sha1;
 import sha3;
+import md5;
 
+let HASH_MD5: i64 = 128;
 let HASH_SHA1: i64 = 160;
 let HASH_SHA224: i64 = 224;
 let HASH_SHA256: i64 = 256;
@@ -34,7 +36,7 @@ fn hash_len(bits: i64) -> i64 {
 
 // The block size HMAC pads its key to.
 fn hash_block(bits: i64) -> i64 {
-    if bits == 160 || bits == 224 || bits == 256 { return 64; }
+    if bits == 128 || bits == 160 || bits == 224 || bits == 256 { return 64; }
     if bits > 3000 && bits < 4000 { return 200 - 2 * hash_len(bits); }
     return 128;
 }
@@ -47,6 +49,11 @@ fn hash2(bits: i64, a: const u8[:], b: const u8[:]) -> u8[>..] {
         sha256_update(s, a);
         sha256_update(s, b);
         if bits == 256 { out.append(sha256_final(s)); } else { out.append(sha224_final(s)); }
+    } else if bits == 128 {
+        var s = md5_init();
+        md5_update(s, a);
+        md5_update(s, b);
+        out.append(md5_final(s));
     } else if bits == 160 {
         var s = sha1_init();
         sha1_update(s, a);

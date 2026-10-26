@@ -1,5 +1,5 @@
-// bignum.ed25519: Ed25519 signatures (RFC 8032 §5.1), on the field
-// arithmetic of bignum.x25519.
+// bignum.ed25519: Ed25519 signatures (RFC 8032 §5.1), and its Ed25519ctx
+// and Ed25519ph variants, on the field arithmetic of bignum.x25519.
 //
 // Points are extended coordinates (X : Y : Z : T) on -x^2 + y^2 = 1 + d x^2 y^2,
 // added by the RFC's formulas, which are complete on this curve, so
@@ -215,40 +215,72 @@ fn ed25519_keypair() -> u8[32], u8[32] {
     return seed, ed25519_public(seed);
 }
 
-// SHA-512(a || b || c) mod L.
-fn ed_hram(a: const u8[:], b: const u8[:], c: const u8[:]) -> u8[32] {
+// SHA-512(d || a || b || c) mod L; d is RFC 8032's dom2 prefix, or empty
+// for plain Ed25519.
+fn ed_hram(d: const u8[:], a: const u8[:], b: const u8[:], c: const u8[:]) -> u8[32] {
     var s = sha512_init();
+    sha512_update(s, d);
     sha512_update(s, a);
     sha512_update(s, b);
     sha512_update(s, c);
     return ed_reduce(sha512_final(s));
 }
 
-// The 64-byte signature R || S of msg. Deterministic.
-fn ed25519_sign(seed: const u8[:], msg: const u8[:]) -> u8[64] {
+// dom2(phflag, context) of RFC 8032 §5.1.
+fn ed_dom2(ph: bool, ctx: const u8[:]) -> u8[>..] {
+    assert(ctx.len <= 255);
+    var d: u8[>..] = [];
+    d.append("SigEd25519 no Ed25519 collisions");
+    d.push(if ph { 1 } else { 0 });
+    d.push(ctx.len as! u8);
+    d.append(ctx);
+    return d;
+}
+
+fn ed_sign_dom(seed: const u8[:], dom: const u8[:], msg: const u8[:]) -> u8[64] {
     let a, prefix = ed_expand(seed);
     let b = ed_base();
     let pa = ed_mul(a, b);
     let pk = ed_encode(pa);
-    let r = ed_hram(prefix, msg, "");
+    let r = ed_hram(dom, prefix, msg, "");
     let pr = ed_mul(r, b);
     let rs = ed_encode(pr);
-    let k = ed_hram(rs, pk, msg);
+    let k = ed_hram(dom, rs, pk, msg);
     let s = ed_muladd(r, k, ed_reduce(a));
     var sig: u8[64] = [0; 64];
     for i in 32 { sig[i] = rs[i]; sig[32 + i] = s[i]; }
     return sig;
 }
 
+// The 64-byte signature R || S of msg. Deterministic.
+fn ed25519_sign(seed: const u8[:], msg: const u8[:]) -> u8[64] { ed_sign_dom(seed, "", msg) }
+
+// Ed25519ctx: a signature bound to a context of 1 to 255 bytes, which
+// verifies under that context only.
+fn ed25519_sign_ctx(seed: const u8[:], msg: const u8[:], ctx: const u8[:]) -> u8[64] {
+    assert(ctx.len >= 1);
+    let d = ed_dom2(false, ctx);
+    return ed_sign_dom(seed, d, msg);
+}
+
+// Ed25519ph: a signature of the message's SHA-512 digest (64 bytes, as
+// Go's Options{Hash: crypto.SHA512} takes it), with a context of up to
+// 255 bytes.
+fn ed25519_sign_ph(seed: const u8[:], digest: const u8[:], ctx: const u8[:] = "") -> u8[64] {
+    assert(digest.len == 64);
+    let d = ed_dom2(true, ctx);
+    return ed_sign_dom(seed, d, digest);
+}
+
 // [8][S]B == [8]R + [8][k]A, with A and R decoded strictly and S < L.
-fn ed25519_verify(pk: const u8[:], msg: const u8[:], sig: const u8[:]) -> bool {
+fn ed_verify_dom(pk: const u8[:], dom: const u8[:], msg: const u8[:], sig: const u8[:]) -> bool {
     if pk.len != 32 || sig.len != 64 { return false; }
     let a, oka = ed_decode(pk);
     let r, okr = ed_decode(sig[..32]);
     if !oka || !okr { return false; }
     let s = le_limbs(sig[32..]);
     if ct_lt(s, ED_L) == 0 { return false; }
-    let k = ed_hram(sig[..32], pk, msg);
+    let k = ed_hram(dom, sig[..32], pk, msg);
     let b = ed_base();
     var lhs = ed_mul(sig[32..], b);
     let ka = ed_mul(k, a);
@@ -261,4 +293,20 @@ fn ed25519_verify(pk: const u8[:], msg: const u8[:], sig: const u8[:]) -> bool {
     }
     return fe_eq(fe_mul(lhs.x, rhs.z), fe_mul(rhs.x, lhs.z))
         && fe_eq(fe_mul(lhs.y, rhs.z), fe_mul(rhs.y, lhs.z));
+}
+
+fn ed25519_verify(pk: const u8[:], msg: const u8[:], sig: const u8[:]) -> bool {
+    ed_verify_dom(pk, "", msg, sig)
+}
+
+fn ed25519_verify_ctx(pk: const u8[:], msg: const u8[:], sig: const u8[:], ctx: const u8[:]) -> bool {
+    if ctx.len < 1 || ctx.len > 255 { return false; }
+    let d = ed_dom2(false, ctx);
+    return ed_verify_dom(pk, d, msg, sig);
+}
+
+fn ed25519_verify_ph(pk: const u8[:], digest: const u8[:], sig: const u8[:], ctx: const u8[:] = "") -> bool {
+    if digest.len != 64 || ctx.len > 255 { return false; }
+    let d = ed_dom2(true, ctx);
+    return ed_verify_dom(pk, d, digest, sig);
 }

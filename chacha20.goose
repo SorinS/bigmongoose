@@ -1,6 +1,6 @@
 // bignum.chacha20: ChaCha20, Poly1305 and the ChaCha20-Poly1305 AEAD
 // (RFC 8439), the TLS 1.3 alternative to AES-GCM for machines without AES
-// instructions. Additions, rotations and xors only: constant time by
+// instructions, and XChaCha20-Poly1305, its 24-byte-nonce form. Additions, rotations and xors only: constant time by
 // construction. Poly1305 keeps its accumulator in five 26-bit limbs (as
 // poly1305-donna-32) so products fit in a u64.
 
@@ -233,4 +233,70 @@ fn chacha20_poly1305_open(key: const u8[:], nonce: const u8[:], aad: const u8[:]
     let ok = chacha20_poly1305_decrypt(key, nonce, aad, out, sealed[n..]);
     if !ok { out.clear(); }
     return out, ok;
+}
+
+// HChaCha20 (draft-irtf-cfrg-xchacha §2.2): a 32-byte subkey from the key
+// and a 16-byte nonce: the ChaCha20 rounds without the final addition,
+// words 0-3 and 12-15.
+fn hchacha20(key: const u8[:], nonce: const u8[:]) -> u8[32] {
+    assert(key.len == 32 && nonce.len == 16);
+    var x: u32[16] = [0; 16];
+    x[0] = 0x61707865; x[1] = 0x3320646e; x[2] = 0x79622d32; x[3] = 0x6b206574;
+    for i in 8 { x[4 + i] = le32_at(key, 4 * i); }
+    for i in 4 { x[12 + i] = le32_at(nonce, 4 * i); }
+    for i in 10 {
+        quarter(x, 0, 4, 8, 12); quarter(x, 1, 5, 9, 13);
+        quarter(x, 2, 6, 10, 14); quarter(x, 3, 7, 11, 15);
+        quarter(x, 0, 5, 10, 15); quarter(x, 1, 6, 11, 12);
+        quarter(x, 2, 7, 8, 13); quarter(x, 3, 4, 9, 14);
+    }
+    var out: u8[32] = [0; 32];
+    for i in 4 {
+        for k in 4 {
+            out[4 * i + k] = (x[i] >> (8 * k)) as! u8;
+            out[16 + 4 * i + k] = (x[12 + i] >> (8 * k)) as! u8;
+        }
+    }
+    return out;
+}
+
+// XChaCha20's subkey and 12-byte nonce for a 24-byte nonce.
+fn xchacha_keys(key: const u8[:], nonce: const u8[:]) -> u8[32], u8[12] {
+    assert(nonce.len == 24);
+    let sub = hchacha20(key, nonce[..16]);
+    var n12: u8[12] = [0; 12];
+    for i in 8 { n12[4 + i] = nonce[16 + i]; }
+    return sub, n12;
+}
+
+// XChaCha20: ChaCha20 with a 24-byte nonce, long enough to choose at
+// random.
+fn xchacha20_xor(key: const u8[:], counter: u32, nonce: const u8[:], data: u8[:]) {
+    let sub, n12 = xchacha_keys(key, nonce);
+    chacha20_xor(sub, counter, n12, data);
+}
+
+// XChaCha20-Poly1305 (draft-irtf-cfrg-xchacha §2.3, Go's
+// chacha20poly1305.NewX): ChaCha20-Poly1305 under the HChaCha20 subkey.
+fn xchacha20_poly1305_encrypt(key: const u8[:], nonce: const u8[:], aad: const u8[:], data: u8[:]) -> u8[16] {
+    let sub, n12 = xchacha_keys(key, nonce);
+    return chacha20_poly1305_encrypt(sub, n12, aad, data);
+}
+
+fn xchacha20_poly1305_decrypt(key: const u8[:], nonce: const u8[:], aad: const u8[:], data: u8[:],
+                              tag: const u8[:]) -> bool {
+    let sub, n12 = xchacha_keys(key, nonce);
+    return chacha20_poly1305_decrypt(sub, n12, aad, data, tag);
+}
+
+fn xchacha20_poly1305_seal(key: const u8[:], nonce: const u8[:], aad: const u8[:],
+                           plaintext: const u8[:]) -> u8[>..] {
+    let sub, n12 = xchacha_keys(key, nonce);
+    return chacha20_poly1305_seal(sub, n12, aad, plaintext);
+}
+
+fn xchacha20_poly1305_open(key: const u8[:], nonce: const u8[:], aad: const u8[:],
+                           sealed: const u8[:]) -> u8[>..], bool {
+    let sub, n12 = xchacha_keys(key, nonce);
+    return chacha20_poly1305_open(sub, n12, aad, sealed);
 }

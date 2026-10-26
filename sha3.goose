@@ -1,8 +1,8 @@
-// bignum.sha3: SHA-3 and SHAKE (FIPS 202), on Keccak-f[1600].
-// sha3_init(bits) for SHA3-224/256/384/512, shake_init(128 or 256) for the
-// extendable-output functions; sha3_update any number of times, then
-// sha3_final for a digest or shake_read as often as needed. Constant time
-// by construction.
+// bignum.sha3: SHA-3 and SHAKE (FIPS 202) and cSHAKE (SP 800-185), on
+// Keccak-f[1600]. sha3_init(bits) for SHA3-224/256/384/512,
+// shake_init(128 or 256) or cshake_init for the extendable-output
+// functions; sha3_update any number of times, then sha3_final for a
+// digest or shake_read as often as needed. Constant time by construction.
 
 namespace bignum;
 
@@ -114,6 +114,47 @@ fn sha3(bits: i64, data: const u8[:]) -> u8[>..] {
 
 fn shake(bits: i64, data: const u8[:], n: i64) -> u8[>..] {
     var s = shake_init(bits);
+    sha3_update(s, data);
+    var out: u8[>..] = [];
+    out.resize(n, 0);
+    shake_read(s, out);
+    return out;
+}
+
+// left_encode (SP 800-185 §2.3.1): x in as few big-endian bytes as it
+// takes (at least one), after their count.
+fn left_encode(out: u8[>..]&, x: u64) {
+    var n = 1;
+    while n < 8 && (x >> (8 * n)) != 0 { n++; }
+    out.push(n as! u8);
+    var i = n;
+    while i > 0 {
+        i--;
+        out.push((x >> (8 * i)) as! u8);
+    }
+}
+
+// cSHAKE128 or cSHAKE256 (SP 800-185 §3), as Go's sha3.NewCSHAKE128 and
+// NewCSHAKE256: SHAKE separated by a function name and a customization
+// string. With both empty it is SHAKE itself. Absorb with sha3_update and
+// read with shake_read.
+fn cshake_init(bits: i64, name: const u8[:], custom: const u8[:]) -> Keccak {
+    var s = shake_init(bits);
+    if name.len == 0 && custom.len == 0 { return s; }
+    s.dsbyte = 0x04;
+    var pre: u8[>..] = [];
+    left_encode(pre, s.rate as! u64);
+    left_encode(pre, 8 * name.len as! u64);
+    pre.append(name);
+    left_encode(pre, 8 * custom.len as! u64);
+    pre.append(custom);
+    while pre.len % s.rate != 0 { pre.push(0); }
+    sha3_update(s, pre);
+    return s;
+}
+
+fn cshake(bits: i64, name: const u8[:], custom: const u8[:], data: const u8[:], n: i64) -> u8[>..] {
+    var s = cshake_init(bits, name, custom);
     sha3_update(s, data);
     var out: u8[>..] = [];
     out.resize(n, 0);

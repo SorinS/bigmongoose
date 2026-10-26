@@ -1,10 +1,10 @@
-// bignum.ec: the NIST curves P-256, P-384 and P-521 (y^2 = x^3 - 3x + b
-// over a prime field): ECDH key agreement, and ECDSA with SHA-256 on
-// P-256, SHA-384 on P-384 and SHA-512 on P-521, its nonces derived
-// deterministically (RFC 6979).
+// bignum.ec: the NIST curves P-224, P-256, P-384 and P-521 (y^2 = x^3 -
+// 3x + b over a prime field): ECDH key agreement, and ECDSA with SHA-224
+// on P-224, SHA-256 on P-256, SHA-384 on P-384 and SHA-512 on P-521, its
+// nonces derived deterministically (RFC 6979).
 //
-// One generic implementation serves all three: field elements are
-// limbs of the curve's width (8, 12 or 17) in Montgomery form, multiplied by
+// One generic implementation serves all four: field elements are
+// limbs of the curve's width (7, 8, 12 or 17) in Montgomery form, multiplied by
 // bignum.mont. Points are projective and added by the complete formulas of
 // Renes, Costello and Batina (2016, algorithm 4 for a = -3), which have no
 // exceptional cases, so doubling is an addition and the point at infinity
@@ -108,12 +108,22 @@ fn ninv(c: const Curve&, a: const u32[:]) -> u32[..17] {
     return r;
 }
 
-// x mod n for x < 2n, as any value below p is (p < 2n on both curves).
+// x mod n for x < 2n, as any value below p is (p < 2n on every curve here).
 fn nreduce(c: const Curve&, x: const u32[:]) -> u32[..17] {
     var r = ec_zero(c);
     for i in c.nl { r[i] = x[i]; }
     ct_cond_sub(r[..], 0, c.n[..]);
     return r;
+}
+
+// x -= 2, for an odd x > 2 (P-224's prime ends in ...0001).
+fn ec_sub2(x: u32[:]) {
+    var borrow: u64 = 2;
+    for i in x.len {
+        let t = (x[i] as u64) - borrow;
+        x[i] = t as! u32;
+        borrow = (t >> 32) & 1;
+    }
 }
 
 fn ec_curve(nl: i64, bits: i64, hash: i64, p: const u8[:], n: const u8[:], b: const u8[:],
@@ -132,13 +142,23 @@ fn ec_curve(nl: i64, bits: i64, hash: i64, p: const u8[:], n: const u8[:], b: co
     c.r2n = ec_zero(c);
     mont_r2(c.r2n[..], c.n[..]);
     c.pm2 = c.p;
-    c.pm2[0] -= 2;                               // the primes end in ...ff, the orders in more than 1
+    ec_sub2(c.pm2[..]);
     c.nm2 = c.n;
-    c.nm2[0] -= 2;
+    ec_sub2(c.nm2[..]);
     c.b = to_mont(c, ec_hex(c, b)[..]);
     c.gx = to_mont(c, ec_hex(c, gx)[..]);
     c.gy = to_mont(c, ec_hex(c, gy)[..]);
     return c;
+}
+
+// secp224r1 (FIPS 186-4 D.1.2.2), signing with SHA-224.
+fn p224() -> Curve {
+    ec_curve(7, 224, 224,
+        "ffffffffffffffffffffffffffffffff000000000000000000000001",
+        "ffffffffffffffffffffffffffff16a2e0b8f03e13dd29455c5c2a3d",
+        "b4050a850c04b3abf54132565044b0b7d7bfd8ba270b39432355ffb4",
+        "b70e0cbd6bb4bf7f321390b94a03c1d356c21122343280d6115c1d21",
+        "bd376388b5f723fb4c22dfe6cd4375a05a07476444d5819985007e34")
 }
 
 // secp256r1 (FIPS 186-4 D.1.2.3), signing with SHA-256.

@@ -1,4 +1,4 @@
-// P-256 and P-384 against vectors/ec.txt, and P-521 against ec521.txt (a Python transcription of SEC 1
+// P-256 and P-384 against vectors/ec.txt, P-521 against ec521.txt and P-224 against ec224.txt (a Python transcription of SEC 1
 // and RFC 6979, checked against openssl): scalar multiples of the
 // generator including 1, 2, n - 2 and n - 1; ECDH; deterministic ECDSA,
 // whose signatures must match byte for byte, verify, survive DER and back,
@@ -71,13 +71,16 @@ fn main() {
     let c256 = bignum::p256();
     let c384 = bignum::p384();
     let c521 = bignum::p521();
+    let c224 = bignum::p224();
     var all: u8[>..] = [];
     all.append(embed_file("vectors/ec.txt"));
     all.append(embed_file("vectors/ec521.txt"));
+    all.append(embed_file("vectors/ec224.txt"));
     for line in split(all, '\n') {
         let w = words(line);
         if w.len == 0 { continue; }
-        let c = if w[1] == "p256" { c256 } else if w[1] == "p384" { c384 } else { c521 };
+        let c = if w[1] == "p256" { c256 } else if w[1] == "p384" { c384 }
+                else if w[1] == "p521" { c521 } else { c224 };
         if w[0] == "mul" {
             let k, ok = bignum::parse(w[2], 16);
             check(line, bignum::ec_public_key(c, bignum::to_bytes_be(k, c.len)) == unhex(w[3]));
@@ -138,7 +141,7 @@ fn main() {
         }
     }
     // Round trips with fresh keys.
-    for c in [c256, c384, c521] {
+    for c in [c224, c256, c384, c521] {
         let a, apk = bignum::ec_keypair(c);
         let b, bpk = bignum::ec_keypair(c);
         let s1, ok1 = bignum::ecdh_shared(c, a, bpk);

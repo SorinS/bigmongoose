@@ -1,6 +1,6 @@
 // bignum.rsa: RSA (RFC 8017): key generation, PKCS #1 v1.5 and PSS
-// signatures with SHA-1, SHA-2 or SHA-3 (bignum.hmac's hash ids), and OAEP encryption with
-// SHA-256. Keys up to 4096 bits.
+// signatures and OAEP encryption with SHA-1, SHA-2 or SHA-3 (bignum.hmac's
+// hash ids), and PKCS #1 v1.5 encryption. Keys up to 4096 bits.
 //
 // The private-key operation is constant time: CRT with Montgomery
 // exponentiation from bignum.mont over limbs of the key's width, the
@@ -466,57 +466,64 @@ fn rsa_verify_pss(key, msg: const u8[:], sig: const u8[:], salt_len: i64 = -1, h
     return ct_eq_bytes(h2, h) == 1;
 }
 
-// OAEP with SHA-256 and MGF1-SHA-256 (RSAES-OAEP). A message takes at most
-// rsa_size(key) - 66 bytes.
-fn rsa_oaep_max(key) -> i64 { rsa_size(key) - 66 }
+// OAEP (RSAES-OAEP) with a hash and MGF1 over the same hash: SHA-256
+// unless `hash` names another bignum.hmac id, as Go's EncryptOAEP takes
+// one. A message takes at most rsa_oaep_max(key, hash) bytes, 2 hash
+// lengths and 2 less than the modulus.
+fn rsa_oaep_max(key, hash: i64 = 256) -> i64 { rsa_size(key) - 2 * hash_len(hash) - 2 }
 
-fn rsa_encrypt_oaep_with_seed(key, msg: const u8[:], label: const u8[:], seed: const u8[:]) -> u8[>..] {
+fn rsa_encrypt_oaep_with_seed(key, msg: const u8[:], label: const u8[:], seed: const u8[:],
+                              hash: i64 = 256) -> u8[>..] {
     let k = rsa_size(key);
-    assert(msg.len <= k - 66 && seed.len == 32);
+    let hl = hash_len(hash);
+    assert(msg.len <= k - 2 * hl - 2 && seed.len == hl);
     var em: u8[>..] = [];
     em.resize(k, 0);
-    let lhash = sha256(label);
-    let dblen = k - 33;
-    let db = em[33..];
-    for i in 32 { db[i] = lhash[i]; }
+    let lhash = hash_bits(hash, label);
+    let dblen = k - hl - 1;
+    let db = em[hl + 1..];
+    for i in hl { db[i] = lhash[i]; }
     db[dblen - msg.len - 1] = 1;
     for i in msg.len { db[dblen - msg.len + i] = msg[i]; }
-    let sd = em[1..33];
-    for i in 32 { sd[i] = seed[i]; }
-    mgf1_xor(db, sd);
-    mgf1_xor(sd, db);
+    let sd = em[1..hl + 1];
+    for i in hl { sd[i] = seed[i]; }
+    mgf1(hash, db, sd);
+    mgf1(hash, sd, db);
     let c, ok = rsa_public_op(key, em);
     assert(ok);
     return c;
 }
 
-fn rsa_encrypt_oaep(key, msg: const u8[:], label: const u8[:] = "") -> u8[>..] {
-    var seed: u8[32] = [0; 32];
+fn rsa_encrypt_oaep(key, msg: const u8[:], label: const u8[:] = "", hash: i64 = 256) -> u8[>..] {
+    var seed: u8[>..] = [];
+    seed.resize(hash_len(hash), 0);
     random_bytes(seed);
-    return rsa_encrypt_oaep_with_seed(key, msg, label, seed);
+    return rsa_encrypt_oaep_with_seed(key, msg, label, seed, hash);
 }
 
 // The message and true, or empty and false. Every check on the decoded
 // block is made in constant time and folded into one flag, so a failure
 // does not say which part was wrong (Manger's attack).
-fn rsa_decrypt_oaep(key: const RsaPrivateKey&, ct: const u8[:], label: const u8[:] = "") -> u8[>..], bool {
+fn rsa_decrypt_oaep(key: const RsaPrivateKey&, ct: const u8[:], label: const u8[:] = "",
+                    hash: i64 = 256) -> u8[>..], bool {
     var out: u8[>..] = [];
     let k = rsa_size(key);
-    if k < 66 { return out, false; }
+    let hl = hash_len(hash);
+    if k < 2 * hl + 2 { return out, false; }
     var em, ok = rsa_private_op(key, ct);
     if !ok { return out, false; }
-    let dblen = k - 33;
-    let sd = em[1..33];
-    let db = em[33..];
-    mgf1_xor(sd, db);
-    mgf1_xor(db, sd);
-    let lhash = sha256(label);
-    var good = ct_is_zero_u32(em[0]) & ct_eq_bytes(db[..32], lhash);
+    let dblen = k - hl - 1;
+    let sd = em[1..hl + 1];
+    let db = em[hl + 1..];
+    mgf1(hash, sd, db);
+    mgf1(hash, db, sd);
+    let lhash = hash_bits(hash, label);
+    var good = ct_is_zero_u32(em[0]) & ct_eq_bytes(db[..hl], lhash);
     // Find the 0x01 after the zero padding, without branching on bytes.
     var found: u32 = 0;
     var bad: u32 = 0;
     var start: u32 = 0;
-    for i in 32..dblen {
+    for i in hl..dblen {
         let b: u32 = db[i];
         let is1 = ct_eq_u32(b, 1) & (found ^ 1);
         let is0 = ct_is_zero_u32(b);
@@ -529,4 +536,83 @@ fn rsa_decrypt_oaep(key: const RsaPrivateKey&, ct: const u8[:], label: const u8[
     let from: i64 = start;
     out.append(db[from..]);
     return out, true;
+}
+
+// PKCS #1 v1.5 encryption (RSAES-PKCS1-v1_5), for protocols that still
+// use it; prefer OAEP. A message takes at most rsa_size(key) - 11 bytes.
+fn rsa_encrypt_pkcs1(key, msg: const u8[:]) -> u8[>..] {
+    let k = rsa_size(key);
+    assert(msg.len <= k - 11);
+    var em: u8[>..] = [];
+    em.resize(k, 0);
+    em[1] = 2;
+    let ps = em[2..k - msg.len - 1];
+    random_bytes(ps);
+    // The padding bytes must not be zero: redraw any that are.
+    var one: u8[1] = [0; 1];
+    for i in ps.len {
+        while ps[i] == 0 {
+            random_bytes(one);
+            ps[i] = one[0];
+        }
+    }
+    for i in msg.len { em[k - msg.len + i] = msg[i]; }
+    let c, ok = rsa_public_op(key, em);
+    assert(ok);
+    return c;
+}
+
+// Decodes 00 02 PS 00 M in constant time: 1 when well formed (PS at least
+// 8 bytes, all nonzero), and where M starts.
+fn pkcs1_decode(em: const u8[:]) -> u32, i64 {
+    let first = ct_is_zero_u32(em[0]);
+    let second = ct_eq_u32(em[1], 2);
+    var looking: u32 = 1;
+    var index: u32 = 0;
+    for i in 2..em.len {
+        let is0 = ct_is_zero_u32(em[i]);
+        index = ct_select_u32(ct_mask(looking & is0), i as! u32, index);
+        looking = looking & (is0 ^ 1);
+    }
+    let valid = first & second & (looking ^ 1) & (ct_lt_u32(index, 10) ^ 1);
+    let start: i64 = ct_select_u32(ct_mask(valid), index + 1, 0);
+    return valid, start;
+}
+
+// The message and true, or empty and false. The padding is checked in
+// constant time, but whether decryption failed is still visible to the
+// caller and whoever it tells: a padding oracle (Bleichenbacher). For
+// session keys, use rsa_decrypt_pkcs1_session_key.
+fn rsa_decrypt_pkcs1(key: const RsaPrivateKey&, ct: const u8[:]) -> u8[>..], bool {
+    var out: u8[>..] = [];
+    if rsa_size(key) < 11 { return out, false; }
+    let em, ok = rsa_private_op(key, ct);
+    if !ok { return out, false; }
+    let valid, start = pkcs1_decode(em);
+    if valid == 0 { return out, false; }
+    out.append(em[start..]);
+    return out, true;
+}
+
+// Go's DecryptPKCS1v15SessionKey: decrypts a key of exactly key_out.len
+// bytes into key_out, which the caller fills with random bytes first. A
+// malformed ciphertext, or one holding a key of another length, leaves
+// key_out as it was, and nothing about which happened takes a different
+// time or path, so the protocol carries on with the random key and fails
+// later, as TLS's RSA key exchange requires. False only when ct is not
+// the size of the modulus, which is public.
+fn rsa_decrypt_pkcs1_session_key(key: const RsaPrivateKey&, ct: const u8[:], key_out: u8[:]) -> bool {
+    let k = rsa_size(key);
+    if key_out.len > k - 11 { return false; }
+    let em, ok = rsa_private_op(key, ct);
+    if !ok { return false; }
+    let valid, start = pkcs1_decode(em);
+    let use = valid & ct_eq_u32(start as! u32, (k - key_out.len) as! u32);
+    let mask = ct_mask(use);
+    for i in key_out.len {
+        let b: u32 = key_out[i];
+        let e: u32 = em[k - key_out.len + i];
+        key_out[i] = ct_select_u32(mask, e, b) as! u8;
+    }
+    return true;
 }

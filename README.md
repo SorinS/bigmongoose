@@ -12,21 +12,31 @@ language, written in Goose: a foundation for cryptography.
 - **`bignum.mont`**: constant-time Montgomery arithmetic for an odd modulus
   (multiply, exponentiate, reduce).
 - **`bignum.x25519`**: X25519 Diffie-Hellman (RFC 7748), constant time.
-- **`bignum.ec`**: P-256, P-384 and P-521: ECDH and deterministic ECDSA
+- **`bignum.ec`**: P-224, P-256, P-384 and P-521: ECDH and deterministic ECDSA
   (RFC 6979), constant time.
-- **`bignum.ed25519`**: Ed25519 signatures (RFC 8032), constant-time signing.
+- **`bignum.ed25519`**: Ed25519 signatures (RFC 8032), with Ed25519ctx and
+  Ed25519ph; constant-time signing.
 - **`bignum.mlkem`**: ML-KEM-512/768/1024 (FIPS 203), post-quantum key
   encapsulation, constant time.
-- **`bignum.rsa`**: RSA with SHA-2 (RFC 8017): key generation, PKCS #1
-  v1.5 and PSS signatures, OAEP encryption; constant-time private key.
+- **`bignum.rsa`**: RSA (RFC 8017): key generation, PKCS #1 v1.5 and PSS
+  signatures, OAEP and PKCS #1 v1.5 encryption; constant-time private key.
 - **`bignum.aes`**: AES-128/192/256 and CTR mode, bitsliced, constant time.
 - **`bignum.gcm`**: AES-GCM authenticated encryption, constant time.
-- **`bignum.chacha20`**: ChaCha20, Poly1305 and ChaCha20-Poly1305 (RFC 8439).
+- **`bignum.modes`**: CBC, CFB, OFB and CTR over any of the block ciphers,
+  and PKCS #7 padding.
+- **`bignum.des`**: DES and triple DES, for legacy data.
+- **`bignum.rc4`**: RC4, for legacy protocols only.
+- **`bignum.chacha20`**: ChaCha20, Poly1305 and ChaCha20-Poly1305 (RFC 8439),
+  and XChaCha20-Poly1305.
 - **`bignum.sha256`**: SHA-256, SHA-224 and MGF1.
 - **`bignum.sha512`**: SHA-512, SHA-384, SHA-512/224 and SHA-512/256.
 - **`bignum.sha1`**: SHA-1, for what still needs it.
-- **`bignum.sha3`**: SHA3-224/256/384/512 and SHAKE128/256.
+- **`bignum.sha3`**: SHA3-224/256/384/512, SHAKE128/256 and cSHAKE.
+- **`bignum.md5`**: MD5, for what still needs it.
+- **`bignum.blake2`**: BLAKE2b and BLAKE2s, keyed or not.
 - **`bignum.hmac`**: one-shot hashing, HMAC, HKDF and MGF1 over any of them.
+- **`bignum.kdf`**: PBKDF2 and scrypt.
+- **`bignum.argon2`**: Argon2id, Argon2i and Argon2d (RFC 9106).
 - **`bignum.entropy`**: random bytes from the OS (`getentropy`), for keys.
 
 ```goose
@@ -144,10 +154,12 @@ exponent's width and reads its table by scanning all 16 entries.
 | Keys | `rsa_generate(bits, e = 65537)` (1024 to 4096, a multiple of 64), `rsa_key_from(n, e, d, p, q) -> key, bool`, `rsa_public_from(n, e) -> pub, bool`, `rsa_public(key)`, `rsa_bits`, `rsa_size` |
 | PKCS #1 v1.5 | `rsa_sign_pkcs1(key, msg, hash = 256)`, `rsa_verify_pkcs1(pub, msg, sig, hash = 256)` |
 | PSS | `rsa_sign_pss(key, msg, salt_len = -1, hash = 256)`, `rsa_sign_pss_with_salt(key, msg, salt, hash = 256)`, `rsa_verify_pss(pub, msg, sig, salt_len = -1, hash = 256)`; a salt_len of -1 means the hash's length |
-| OAEP | `rsa_encrypt_oaep(pub, msg, label = "")`, `rsa_encrypt_oaep_with_seed`, `rsa_decrypt_oaep(key, ct, label = "") -> msg, bool`, `rsa_oaep_max` |
+| OAEP | `rsa_encrypt_oaep(pub, msg, label = "", hash = 256)`, `rsa_encrypt_oaep_with_seed`, `rsa_decrypt_oaep(key, ct, label = "", hash = 256) -> msg, bool`, `rsa_oaep_max(key, hash = 256)` |
+| PKCS #1 v1.5 encryption | `rsa_encrypt_pkcs1(pub, msg)`, `rsa_decrypt_pkcs1(key, ct) -> msg, bool`, `rsa_decrypt_pkcs1_session_key(key, ct, key_out) -> bool` |
 | Raw | `rsa_public_op(pub, x)`, `rsa_private_op(key, x) -> bytes, bool` |
 
-Signatures hash with SHA-256, SHA-384 or SHA-512 (`hash` is 256, 384 or 512), with PSS's MGF1 on the same hash; OAEP uses SHA-256. A key is fixed-size limb
+`hash` is any of bignum.hmac's hash ids (SHA-256 by default), and PSS
+and OAEP run MGF1 on the same hash. A key is fixed-size limb
 arrays (`u32[..128]`, so at most 4096 bits), and every function that only
 needs the public half accepts a private key as well. The private operation
 works by CRT. It blinds its input with r^e for a random r, and checks the
@@ -155,7 +167,11 @@ result against the public exponent before releasing it, so a fault in one
 CRT half cannot leak a prime. PKCS #1 v1.5 signatures are verified by
 rebuilding the encoding and comparing it whole. OAEP decryption checks
 every field in constant time and reports one failure flag. PKCS #1 v1.5
-*encryption* is left out on purpose (Bleichenbacher's attack).
+decryption checks its padding in constant time too, but saying whether
+it failed is a padding oracle (Bleichenbacher's attack). So, as in Go,
+`rsa_decrypt_pkcs1_session_key` writes the key only when the padding is
+good and the length right, and otherwise leaves the caller's random bytes
+in place, with no difference in time or path. Use OAEP for anything new.
 
 ### AES and GCM
 
@@ -174,6 +190,24 @@ spread into 4-bit lanes (as in BearSSL's `ghash_ctmul64`), not with tables.
 Never reuse a nonce under one key. 12 bytes is the standard size; other
 lengths work too.
 
+`bignum.modes` has the other modes of Go's crypto/cipher, written once
+over any block cipher with a `cipher_encrypt` overload (AES, DES and
+triple DES here). Each works in place from a one-block IV:
+- `cbc_encrypt` and `cbc_decrypt` take whole blocks;
+- `cfb_encrypt` and `cfb_decrypt` (full-block segments, CFB-128 for AES),
+  `ofb_xor` and `ctr_xor` take any length.
+
+`pkcs7_pad(data, bs = 16)` and `pkcs7_unpad(data, bs) -> data, bool` add
+and remove CBC padding; unpadding checks in constant time. Without a MAC
+checked first, a CBC decryption that reports bad padding is still a
+padding oracle, so prefer an AEAD.
+
+`des_init(key8)` and `des3_init(key24)` expand DES and triple-DES (EDE)
+keys, with `des_encrypt_block` / `des3_encrypt_block` and their decrypt
+forms. The S-boxes are bit masks selected by shifts, so no table is read
+at a secret index. `rc4_init(key)` and `rc4_xor(r, data)` are RC4, which
+is broken and, as in Go, indexes its state by secret values.
+
 ### ChaCha20-Poly1305
 
 `chacha20_poly1305_seal(key, nonce, aad, pt)` / `_open` and the in-place
@@ -183,10 +217,16 @@ public too: `chacha20_block`, `chacha20_xor(key, counter, nonce, data)`,
 and `poly1305` one-shot or streaming. Poly1305 uses five 26-bit limbs
 (after poly1305-donna-32), and its final reduction is a masked select.
 
+`xchacha20_poly1305_seal` / `_open` (and `_encrypt` / `_decrypt`) take a
+24-byte nonce, long enough to pick at random, as Go's
+`chacha20poly1305.NewX`. They run ChaCha20-Poly1305 under a subkey from
+`hchacha20(key, nonce[..16])`; `xchacha20_xor` is the bare stream.
+
 ### Elliptic curves
 
-`bignum.ec` handles P-256, P-384 and P-521 with one generic
-implementation. `p256()`, `p384()` and `p521()` return a `Curve` holding the field prime, the group
+`bignum.ec` handles P-224, P-256, P-384 and P-521 with one generic
+implementation. `p224()`, `p256()`, `p384()` and `p521()` return a `Curve`
+holding the field prime, the group
 order, their Montgomery constants and the generator; build one and pass it
 to every call. Field elements are limbs of the curve's width in Montgomery
 form, multiplied by `bignum.mont`. Points are projective and added with
@@ -197,9 +237,9 @@ the whole scalar width and reads its table by scanning every entry.
 
 | Group | Functions |
 |---|---|
-| Keys | `ec_keypair(c) -> sk, pk`, `ec_public_key(c, sk)`; private keys are `len` big-endian bytes (32 or 48), public keys the uncompressed 04 ‖ x ‖ y |
+| Keys | `ec_keypair(c) -> sk, pk`, `ec_public_key(c, sk)`; private keys are `len` big-endian bytes (28, 32, 48 or 66), public keys the uncompressed 04 ‖ x ‖ y |
 | ECDH | `ecdh_shared(c, sk, peer) -> x, bool`: false unless the peer's point is on the curve and correctly encoded |
-| ECDSA | `ecdsa_sign(c, sk, msg)`, `ecdsa_verify(c, pk, msg, sig)` with SHA-256 on P-256, SHA-384 on P-384 and SHA-512 on P-521; `ecdsa_verify_digest` for any hash |
+| ECDSA | `ecdsa_sign(c, sk, msg)`, `ecdsa_verify(c, pk, msg, sig)` with SHA-224 on P-224, SHA-256 on P-256, SHA-384 on P-384 and SHA-512 on P-521; `ecdsa_sign_digest` and `ecdsa_verify_digest` for any hash |
 | DER | `ecdsa_sig_to_der(raw)`, `ecdsa_sig_from_der(c, der) -> raw, bool` (strict: minimal integers, no trailing bytes) |
 
 ECDSA nonces come from RFC 6979's HMAC-DRBG, so signing needs no
@@ -211,7 +251,10 @@ with the RFC's complete addition, and reduces scalars mod L through
 `ed25519_public(seed)`, `ed25519_sign(seed, msg)`,
 `ed25519_verify(pk, msg, sig)`. Verification uses the cofactored equation
 [8]SB = [8]R + [8]kA. It rejects S ≥ L and non-canonical encodings of A
-and R.
+and R. `ed25519_sign_ctx(seed, msg, ctx)` / `ed25519_verify_ctx` are
+Ed25519ctx, with a context of 1 to 255 bytes. `ed25519_sign_ph(seed,
+digest, ctx = "")` / `ed25519_verify_ph` are Ed25519ph. As in Go, they
+take the message's SHA-512 digest, not the message.
 
 ### ML-KEM
 
@@ -234,14 +277,35 @@ Every hash comes one-shot or streaming (`*_init`, `*_update`, `*_final`):
 - `sha224` and `sha256`;
 - `sha384`, `sha512`, `sha512_224` and `sha512_256`;
 - `sha3(bits, data)`, and `shake(bits, data, n)` with `shake_read` to
-  squeeze any amount.
+  squeeze any amount;
+- `cshake(bits, name, custom, data, n)` and `cshake_init`, as Go's
+  `sha3.NewCSHAKE128/256`;
+- `md5`;
+- `blake2b(data, outlen = 64, key = "")` and `blake2s(data, outlen = 32,
+  key = "")`, keyed when a key is given.
 
-The generic functions name a hash by an id: 160 (SHA-1), 224, 256, 384,
+The generic functions name a hash by an id: 128 (MD5), 160 (SHA-1), 224, 256, 384,
 512, `HASH_SHA512_224`, `HASH_SHA512_256` and `HASH_SHA3_224` through
 `HASH_SHA3_512`. They include `hash_bits(id, data)`, HMAC, HKDF, MGF1, and
 RSA PKCS #1 v1.5 and PSS signatures. `hmac(id, key, msg)` and the `hmac_sha256/384/512` shortcuts cover HMAC.
 `hkdf_extract`, `hkdf_expand` and `hkdf` cover HKDF. TLS 1.3's HKDF-Expand-Label is a
 few lines on top of `hkdf_expand` and is not included.
+
+### Password hashing and key derivation
+
+| Function | Parameters |
+|---|---|
+| `argon2id_key(password, salt, t, m, p, len)` | Go's `argon2.IDKey`: t passes over m KiB with p lanes. The one to use for passwords. |
+| `argon2i_key(...)` | Go's `argon2.Key` (Argon2i) |
+| `argon2(kind, password, salt, secret, ad, t, m, p, len)` | `ARGON2D`, `ARGON2I` or `ARGON2ID`, with the optional secret key and associated data |
+| `scrypt(password, salt, n, r, p, len) -> key, bool` | as `scrypt.Key`; false for bad parameters |
+| `pbkdf2(hash, password, salt, iter, len)` | over HMAC with any hash id, as `crypto/pbkdf2` |
+
+The lanes of Argon2 are filled one after another, which gives the same
+output as running them in parallel. Argon2i, and Argon2id in the first
+half of its first pass, read memory at positions that do not depend on
+the password. Argon2d, Argon2id after that, and scrypt read at
+password-dependent positions, as their designs intend.
 
 ### Speed
 
@@ -254,12 +318,18 @@ Native build, Apple Silicon, clang -O2:
 | P-256 ECDH / ECDSA sign / verify | 1.1 / 1.2 / 2.2 ms |
 | P-384 ECDH / ECDSA sign / verify | 3.4 / 3.6 / 6.8 ms |
 | P-521 ECDH / ECDSA sign / verify | 7.8 / 8.3 / 16 ms |
+| P-224 ECDH / ECDSA sign / verify | 1.4 / 0.9 / 1.6 ms |
 | RSA-2048 private key (sign, decrypt) | 8 ms |
 | RSA-2048 public key (verify, encrypt) | 0.1 ms |
 | RSA-2048 key generation | about 0.4 s on average; 30 to 870 ms over eight runs |
 | ML-KEM-768 keygen / encaps / decaps | 43 / 46 / 58 µs |
 | AES-256-GCM | 58 MB/s |
 | ChaCha20-Poly1305 | 230 MB/s |
+| AES-256-CBC / triple-DES-CBC | 35 / 3 MB/s |
+| BLAKE2b | 570 MB/s |
+| Argon2id, t = 1, 64 MiB, 4 lanes | 66 ms (openssl: 48 ms) |
+| scrypt, N = 2^15, r = 8, p = 1 | 64 ms (openssl, through hashlib: 70 ms) |
+| PBKDF2-HMAC-SHA-256, 100,000 iterations | 71 ms |
 
 ### Caveats
 
@@ -334,13 +404,34 @@ python3 scripts/gen_vectors.py          # regenerate test/vectors from Python's 
   are S ≥ L and non-canonical or off-curve keys.
 - `rsa_api`: generated keys, key loading checks, raw operation bounds,
   signatures and ciphertexts under the wrong key.
+- `ec_vectors` also reads `ec224.txt`: P-224 the same way, with RFC 6979's
+  P-224 signature.
+- `modes_vectors`: CBC, CFB, OFB and CTR over AES (each key size), DES and
+  triple DES, at lengths around the block, each way. Also single DES and
+  triple-DES blocks (with the textbook vector), MD5 and HMAC-MD5, RC4 with
+  keys of 1 to 256 bytes, and PKCS #7 padding with every malformed variant
+  refused. All of it is checked against openssl.
+- `kdf_vectors`: BLAKE2b and BLAKE2s (keyed and not, every output length,
+  in pieces) and PBKDF2 over each hash family, against hashlib; scrypt
+  with RFC 7914's cases; Argon2d, Argon2i and Argon2id. The Argon2 cases
+  include RFC 9106's vectors and ones from openssl with 1 to 4 lanes and
+  memory past an address block.
+- `extra_vectors`: XChaCha20-Poly1305 (the draft's vectors), cSHAKE (SP
+  800-185's samples), Ed25519ctx and Ed25519ph (RFC 8032 §7.2 and §7.3,
+  and openssl). On one 2048-bit key: OAEP over SHA-1, SHA-2 and SHA-3,
+  and PKCS #1 v1.5 encryption, including openssl's own ciphertexts, with
+  malformed padding refused and the session-key form left untouched.
 
 `scripts/crypto_vectors.py` holds the Python transcriptions behind the
 AES, GCM, ChaCha20-Poly1305, RSA, EC and Ed25519 vectors (hashes, HMAC and HKDF come from
 hashlib). Each transcription is first checked against its standard's
 published vectors. Then, while generating, every AES, CTR, ChaCha20,
 Poly1305, RSA, ECDH, ECDSA and Ed25519 vector is also checked with the `openssl` command when
-it is installed.
+it is installed. `scripts/extra_vectors.py` does the same for everything
+added later (with `des_ref.py`, a DES transcription). It checks cSHAKE's
+transcription through openssl's KMAC, which is built on it. Its Argon2
+cases and openssl's own PKCS #1 v1.5 ciphertexts come from openssl
+itself, so they change when regenerated.
 
 The compiler is found from `--goose`, then `$GOOSE`, then `goose` on PATH,
 then `../goose.git/build/goose`.
