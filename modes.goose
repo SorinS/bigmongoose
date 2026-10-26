@@ -1,6 +1,8 @@
 // bignum.modes: the block cipher modes of SP 800-38A over any block
-// cipher here (AES, DES, triple DES): CBC, CFB, OFB and CTR, as Go's
-// crypto/cipher has them, and PKCS #7 padding for CBC.
+// cipher here (AES, DES, triple DES, and the legacy ciphers that add
+// themselves): CBC, CFB, OFB and CTR, as Go's crypto/cipher has them,
+// XTS (IEEE 1619) for 16-byte blocks as Go's x/crypto/xts has it, and
+// PKCS #7 padding for CBC.
 //
 // Each mode works in place on the whole message, from an IV of one block.
 // CBC takes whole blocks only; CFB (with full-block segments, CFB-128 for
@@ -129,6 +131,35 @@ fn ctr_xor<K>(k: const K&, iv: const u8[:], data: u8[:]) {
         off += n;
     }
 }
+
+// XTS (IEEE 1619, SP 800-38E) for a 16-byte block cipher: k1 encrypts
+// the data and k2 the tweak, which starts as the sector number in 16
+// little-endian bytes and is multiplied by x in GF(2^128) each block.
+// Whole blocks only, as in Go (no ciphertext stealing).
+fn xts_crypt<K>(k1: const K&, k2: const K&, sector: u64, data: u8[:], decrypt: bool) {
+    assert(cipher_block_len(k1) == 16 && data.len % 16 == 0);
+    var t: u8[16] = [0; 16];
+    for i in 8 { t[i] = (sector >> (8 * i)) as! u8; }
+    var tw = cipher_encrypt(k2, t);
+    var off = 0;
+    var x: u8[16] = [0; 16];
+    while off < data.len {
+        for i in 16 { x[i] = data[off + i] ^ tw[i]; }
+        let e = if decrypt { cipher_decrypt(k1, x) } else { cipher_encrypt(k1, x) };
+        for i in 16 { data[off + i] = e[i] ^ tw[i]; }
+        var carry: u8 = 0;
+        for i in 16 {
+            let c = tw[i] >> 7;
+            tw[i] = (tw[i] << 1) | carry;
+            carry = c;
+        }
+        tw[0] ^= 0x87 & (0 - carry);
+        off += 16;
+    }
+}
+
+fn xts_encrypt<K>(k1: const K&, k2: const K&, sector: u64, data: u8[:]) { xts_crypt(k1, k2, sector, data, false); }
+fn xts_decrypt<K>(k1: const K&, k2: const K&, sector: u64, data: u8[:]) { xts_crypt(k1, k2, sector, data, true); }
 
 // PKCS #7 padding (RFC 5652 §6.3): 1 to bs bytes, each holding the count.
 fn pkcs7_pad(data: const u8[:], bs: i64 = 16) -> u8[>..] {

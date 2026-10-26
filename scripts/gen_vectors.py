@@ -6,7 +6,7 @@ every number in signed lowercase hex (`-1f`, `0`); test/vectors/x25519.txt:
 `scalar u result` as 32-byte little-endian hex, from an RFC 7748 transcription;
 and sha256.txt, aes.txt, gcm.txt and rsa.txt from hashlib and transcriptions
 of FIPS 197, SP 800-38D and RFC 8017 (see crypto_vectors.py), and the rest
-from extra_vectors.py, all cross-checked against the openssl command when
+from extra_vectors.py and parity_vectors.py, all cross-checked against the openssl command when
 it is installed.
 Deterministic (fixed seed).
 
@@ -181,6 +181,9 @@ def main():
         write(name, lines)
     import extra_vectors
     for name, lines in extra_vectors.generate().items():
+        write(name, lines)
+    import parity_vectors
+    for name, lines in parity_vectors.generate().items():
         write(name, lines)
 
 

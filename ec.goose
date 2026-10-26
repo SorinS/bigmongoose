@@ -535,8 +535,14 @@ fn der_read_uint(der: const u8[:], at: i64, out: u8[:]) -> i64 {
 // A DER signature back to r || s of 2 * len bytes; strict, so a signature
 // has exactly one accepted encoding.
 fn ecdsa_sig_from_der(c: const Curve&, der: const u8[:]) -> u8[>..], bool {
+    let raw, ok = sig_from_der(c.len, der);
+    return raw, ok;
+}
+
+// The same for any width of r and s.
+fn sig_from_der(len: i64, der: const u8[:]) -> u8[>..], bool {
     var raw: u8[>..] = [];
-    raw.resize(2 * c.len, 0);
+    raw.resize(2 * len, 0);
     // The SEQUENCE's length in the short form, or 0x81 and a byte >= 128.
     var hdr = 2;
     var ok = der.len >= 2 && der[0] == 0x30;
@@ -547,8 +553,8 @@ fn ecdsa_sig_from_der(c: const Curve&, der: const u8[:]) -> u8[>..], bool {
         ok = der[1] < 128 && der[1] as i64 + 2 == der.len;
     }
     if ok {
-        let mid = der_read_uint(der, hdr, raw[..c.len]);
-        ok = mid >= 0 && der_read_uint(der, mid, raw[c.len..]) == der.len;
+        let mid = der_read_uint(der, hdr, raw[..len]);
+        ok = mid >= 0 && der_read_uint(der, mid, raw[len..]) == der.len;
     }
     if !ok { raw.clear(); }
     return raw, ok;

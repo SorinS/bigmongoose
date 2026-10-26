@@ -18,25 +18,43 @@ language, written in Goose: a foundation for cryptography.
   Ed25519ph; constant-time signing.
 - **`bignum.mlkem`**: ML-KEM-512/768/1024 (FIPS 203), post-quantum key
   encapsulation, constant time.
+- **`bignum.mldsa`**: ML-DSA-44/65/87 (FIPS 204), post-quantum signatures,
+  hedged or deterministic, with contexts and external mu; constant time.
+- **`bignum.hpke`**: HPKE (RFC 9180), all four modes, with DHKEM over
+  P-256/384/521 and X25519, ML-KEM and the ML-KEM hybrids (X-Wing among
+  them), HKDF and SHAKE KDFs, AES-GCM, ChaCha20-Poly1305 and export-only.
 - **`bignum.rsa`**: RSA (RFC 8017): key generation, PKCS #1 v1.5 and PSS
   signatures, OAEP and PKCS #1 v1.5 encryption; constant-time private key.
+- **`bignum.dsa`**: DSA (FIPS 186-4), for legacy keys: parameters, keys,
+  random-nonce and deterministic (RFC 6979) signatures; constant-time
+  signing.
 - **`bignum.aes`**: AES-128/192/256 and CTR mode, bitsliced, constant time.
 - **`bignum.gcm`**: AES-GCM authenticated encryption, constant time.
 - **`bignum.modes`**: CBC, CFB, OFB and CTR over any of the block ciphers,
-  and PKCS #7 padding.
+  XTS over 16-byte ones, and PKCS #7 padding.
 - **`bignum.des`**: DES and triple DES, for legacy data.
 - **`bignum.rc4`**: RC4, for legacy protocols only.
+- **`bignum.blowfish`**, **`bignum.cast5`**, **`bignum.twofish`**,
+  **`bignum.tea`** (TEA and XTEA), **`bignum.rc2`**: the legacy block
+  ciphers of Go's x/crypto (and RC2 from its PKCS #12 decoder), each
+  usable with `bignum.modes`. Table-driven, so not constant time.
+- **`bignum.salsa20`**: Salsa20, XSalsa20 and HSalsa20.
+- **`bignum.nacl`**: NaCl secretbox, box (and sealed anonymous boxes),
+  sign and auth, as Go's x/crypto/nacl.
 - **`bignum.chacha20`**: ChaCha20, Poly1305 and ChaCha20-Poly1305 (RFC 8439),
   and XChaCha20-Poly1305.
 - **`bignum.sha256`**: SHA-256, SHA-224 and MGF1.
 - **`bignum.sha512`**: SHA-512, SHA-384, SHA-512/224 and SHA-512/256.
 - **`bignum.sha1`**: SHA-1, for what still needs it.
 - **`bignum.sha3`**: SHA3-224/256/384/512, SHAKE128/256 and cSHAKE.
+- **`bignum.md4`**, **`bignum.ripemd160`**: MD4 and RIPEMD-160, for the
+  formats that still carry them.
 - **`bignum.md5`**: MD5, for what still needs it.
 - **`bignum.blake2`**: BLAKE2b and BLAKE2s, keyed or not, and the BLAKE2Xb and
   BLAKE2Xs XOFs.
 - **`bignum.hmac`**: one-shot hashing, HMAC, HKDF and MGF1 over any of them.
 - **`bignum.kdf`**: PBKDF2 and scrypt.
+- **`bignum.bcrypt`**: bcrypt password hashes, as Go's x/crypto/bcrypt.
 - **`bignum.argon2`**: Argon2id, Argon2i and Argon2d (RFC 9106).
 - **`bignum.entropy`**: random bytes from the OS (`getentropy`), for keys.
 
@@ -174,6 +192,19 @@ it failed is a padding oracle (Bleichenbacher's attack). So, as in Go,
 good and the length right, and otherwise leaves the caller's random bytes
 in place, with no difference in time or path. Use OAEP for anything new.
 
+### DSA
+
+`dsa_generate_parameters(l, n)` makes p, q, g for (1024, 160), (2048, 224),
+(2048, 256) or (3072, 256) as Go's crypto/dsa does, and
+`dsa_generate_key(p, q, g)` a key on them. `dsa_key_from(p, q, g, y, x =
+"")` checks and holds big-endian parts (no x for a public key);
+`dsa_public` drops x. `dsa_sign(key, digest)` uses a random nonce,
+`dsa_sign_deterministic(key, digest, hash_id)` RFC 6979's, and
+`dsa_verify(key, digest, sig)` checks an r ‖ s signature. Digests are cut
+to q's leftmost bits, as FIPS 186 and openssl do; Go leaves that to the
+caller. `dsa_sig_to_der` and `dsa_sig_from_der` convert to and from the
+DER form that X.509 and openssl use.
+
 ### AES and GCM
 
 `aes_init(key)` expands a 16-, 24- or 32-byte key. `aes_encrypt_block` and
@@ -271,6 +302,39 @@ the message, for tests. Every reduction mod q, including Compress's
 division, is a multiply and a shift (the KyberSlash class of timing leaks
 cannot occur).
 
+### ML-DSA
+
+The set is 44, 65 or 87. `mldsa_keygen(set)` gives a 32-byte seed (the
+private key, as in Go's crypto/mldsa) and the public key;
+`mldsa_public_key(set, seed)` recomputes it, and `mldsa_expand_key` gives
+the FIPS 204 expanded private key for formats that carry it.
+`mldsa_sign(set, seed, msg, ctx = "")` is hedged (fresh randomness mixed
+in) and `mldsa_sign_deterministic` is not; contexts run to 255 bytes.
+`mldsa_verify(set, pk, msg, sig, ctx = "")` refuses wrong lengths and any
+hint encoding but the canonical one. `mldsa_mu(pk, msg, ctx)`,
+`mldsa_sign_mu` and `mldsa_verify_mu` work on a precomputed message
+representative, as Go's `crypto.MLDSAMu` does. Products are Montgomery
+reductions with masked corrections and Decompose is a multiply and shift,
+so the secret side never divides or branches on secret values; the
+rejection loop's restarts are public, as the standard allows.
+
+### HPKE
+
+Algorithms are named by their RFC 9180 and draft-ietf-hpke-pq ids
+(`HPKE_DHKEM_X25519`, `HPKE_MLKEM768_X25519`, `HPKE_HKDF_SHA256`,
+`HPKE_SHAKE256`, `HPKE_AES128GCM`, `HPKE_EXPORT_ONLY`, ...), the same set
+as Go's crypto/hpke plus ML-KEM-512. `hpke_keygen(kem)` and
+`hpke_derive_key_pair(kem, ikm)` give a private key in the KEM's own
+serialization and the public key. `hpke_sender(kem, kdf, aead, pk, info,
+psk = "", psk_id = "", sk_s = "") -> enc, ctx, ok` and `hpke_recipient(kem,
+kdf, aead, sk, enc, info, psk, psk_id, pk_s)` set up a context; a PSK
+selects the PSK modes and a sender key the authenticated ones (DHKEM
+only; the SHAKE KDFs, as in Go, run in base mode only). Then
+`hpke_seal(ctx, aad, pt)`, `hpke_open` (which leaves the sequence number
+alone on failure) and `hpke_export(ctx, exporter_context, n)`.
+`hpke_seal_once` and `hpke_open_once` are Go's single-shot `Seal` and
+`Open`: the encapsulated key followed by the ciphertext.
+
 ### Hashes, HMAC, HKDF
 
 Every hash comes one-shot or streaming (`*_init`, `*_update`, `*_final`):
@@ -301,6 +365,27 @@ take MD5, SHA-1, SHA-2 and SHA-3 but not BLAKE2, which has no DigestInfo
 `hkdf_extract`, `hkdf_expand` and `hkdf` cover HKDF. TLS 1.3's HKDF-Expand-Label is a
 few lines on top of `hkdf_expand` and is not included.
 
+### Go's x/crypto extras
+
+- `md4(data)`, `ripemd160(data)`, each also streaming (`_init`,
+  `_update`, `_final`).
+- `salsa20_xor(key, nonce, data)`: Salsa20 for an 8-byte nonce, XSalsa20
+  for a 24-byte one, in place; `hsalsa20(key, input16)`.
+- NaCl: `secretbox_seal(msg, nonce, key)` (tag first, as NaCl) and
+  `secretbox_open`; `box_keypair`, `box_precompute`, `box_seal(msg, nonce,
+  peer_pk, sk)`, `box_open`, `box_seal_anonymous(msg, pk)` and
+  `box_open_anonymous(sealed, pk, sk)`; `nacl_sign(msg, sk64)` and
+  `nacl_sign_open`; `nacl_auth(msg, key)` and `nacl_auth_verify`.
+- `bcrypt_hash(password, cost = 10) -> hash, ok` ("$2a$", false past 72
+  bytes or for a cost above 31), `bcrypt_verify(hash, password)` (in
+  constant time; $2b$ and $2y$ too) and `bcrypt_cost(hash)`.
+- `blowfish_init(key)`, `cast5_init(key16)`, `twofish_init(key)`,
+  `tea_init(key, rounds = 64)`, `xtea_init(key)`, `rc2_init(key,
+  effective_bits)`, each with `_encrypt_block` / `_decrypt_block` and
+  usable with every mode.
+- `xts_encrypt(k1, k2, sector, data)` and `xts_decrypt`, whole 16-byte
+  blocks, as Go's x/crypto/xts.
+
 ### Password hashing and key derivation
 
 | Function | Parameters |
@@ -319,27 +404,79 @@ password-dependent positions, as their designs intend.
 
 ### Speed
 
-Native build, Apple Silicon, clang -O2:
+Side by side with OpenSSL 3.6.4 on an Apple M1: the Goose figures from a
+native build (clang -O2), openssl's from `openssl speed -evp` over 16 KiB
+buffers, PBKDF2 and scrypt through Python's hashlib (which calls OpenSSL),
+and Argon2id through `openssl kdf` less its start-up time. The last column
+is Goose / OpenSSL: above 1 is faster. `python3 scripts/speed_vs_openssl.py
+[prefix]` rebuilds `examples/speed.goose` and prints this table afresh.
 
-| Operation | Time |
-|---|---|
-| X25519 | 85 µs |
-| Ed25519 sign / verify | 0.3 ms / 0.3 ms |
-| P-256 ECDH / ECDSA sign / verify | 1.1 / 1.2 / 2.2 ms |
-| P-384 ECDH / ECDSA sign / verify | 3.4 / 3.6 / 6.8 ms |
-| P-521 ECDH / ECDSA sign / verify | 7.8 / 8.3 / 16 ms |
-| P-224 ECDH / ECDSA sign / verify | 1.4 / 0.9 / 1.6 ms |
-| RSA-2048 private key (sign, decrypt) | 8 ms |
-| RSA-2048 public key (verify, encrypt) | 0.1 ms |
-| RSA-2048 key generation | about 0.4 s on average; 30 to 870 ms over eight runs |
-| ML-KEM-768 keygen / encaps / decaps | 43 / 46 / 58 µs |
-| AES-256-GCM | 58 MB/s |
-| ChaCha20-Poly1305 | 230 MB/s |
-| AES-256-CBC / triple-DES-CBC | 35 / 3 MB/s |
-| BLAKE2b | 570 MB/s |
-| Argon2id, t = 1, 64 MiB, 4 lanes | 66 ms (openssl: 48 ms) |
-| scrypt, N = 2^15, r = 8, p = 1 | 64 ms (openssl, through hashlib: 70 ms) |
-| PBKDF2-HMAC-SHA-256, 100,000 iterations | 71 ms |
+| Operation | Goose | OpenSSL 3.6.4 | Goose / OpenSSL |
+|---|---:|---:|---:|
+| md5 | 264.2 MB/s | 700.0 MB/s | 0.38 |
+| sha1 | 235.4 MB/s | 2,396.6 MB/s | 0.10 |
+| sha256 | 209.4 MB/s | 2,447.6 MB/s | 0.09 |
+| sha512 | 306.1 MB/s | 1,430.2 MB/s | 0.21 |
+| sha3-256 | 209.9 MB/s | 899.7 MB/s | 0.23 |
+| blake2b512 | 590.2 MB/s | 741.3 MB/s | 0.80 |
+| blake2s256 | 439.9 MB/s | 445.2 MB/s | 0.99 |
+| hmac-sha256 | 206.9 MB/s | 2,426.5 MB/s | 0.09 |
+| aes-128-gcm | 81.2 MB/s | 8,164.7 MB/s | 0.01 |
+| aes-256-gcm | 61.6 MB/s | 6,823.1 MB/s | 0.01 |
+| chacha20-poly1305 | 390.0 MB/s | 1,829.2 MB/s | 0.21 |
+| chacha20 | 530.2 MB/s | 2,517.4 MB/s | 0.21 |
+| aes-128-ctr | 91.6 MB/s | 12,958.7 MB/s | 0.01 |
+| aes-256-ctr | 67.2 MB/s | 9,474.9 MB/s | 0.01 |
+| aes-128-cbc | 48.2 MB/s | 1,597.8 MB/s | 0.03 |
+| aes-256-cbc | 34.9 MB/s | 1,132.8 MB/s | 0.03 |
+| aes-128-cfb | 47.9 MB/s | 1,099.5 MB/s | 0.04 |
+| aes-128-ofb | 48.5 MB/s | 1,054.6 MB/s | 0.05 |
+| des-cbc | 9.8 MB/s | 87.5 MB/s | 0.11 |
+| des-ede3-cbc | 3.3 MB/s | 33.4 MB/s | 0.10 |
+| rc4 | 1,061.4 MB/s | 1,293.4 MB/s | 0.82 |
+| x25519 | 11,389 op/s | 33,844 op/s | 0.34 |
+| ed25519-sign | 3,606 op/s | 33,389 op/s | 0.11 |
+| ed25519-verify | 3,681 op/s | 12,052 op/s | 0.31 |
+| ecdh-p224 | 1,245 op/s | 21,321 op/s | 0.06 |
+| ecdsa-p224-sign | 1,170 op/s | 30,208 op/s | 0.04 |
+| ecdsa-p224-verify | 613 op/s | 13,916 op/s | 0.04 |
+| ecdh-p256 | 927 op/s | 25,237 op/s | 0.04 |
+| ecdsa-p256-sign | 866 op/s | 58,872 op/s | 0.01 |
+| ecdsa-p256-verify | 462 op/s | 19,031 op/s | 0.02 |
+| ecdh-p384 | 305 op/s | 4,765 op/s | 0.06 |
+| ecdsa-p384-sign | 287 op/s | 7,142 op/s | 0.04 |
+| ecdsa-p384-verify | 153 op/s | 3,306 op/s | 0.05 |
+| ecdh-p521 | 132 op/s | 4,716 op/s | 0.03 |
+| ecdsa-p521-sign | 125 op/s | 4,790 op/s | 0.03 |
+| ecdsa-p521-verify | 65.9 op/s | 2,654.0 op/s | 0.02 |
+| rsa2048-sign | 125 op/s | 1,867 op/s | 0.07 |
+| rsa2048-verify | 5,883 op/s | 71,844 op/s | 0.08 |
+| rsa3072-sign | 43.5 op/s | 635.6 op/s | 0.07 |
+| rsa3072-verify | 2,880 op/s | 34,003 op/s | 0.08 |
+| rsa4096-sign | 18.1 op/s | 291.1 op/s | 0.06 |
+| rsa4096-verify | 1,659 op/s | 19,485 op/s | 0.09 |
+| mlkem512-keygen | 36,783 op/s | 46,565 op/s | 0.79 |
+| mlkem512-encaps | 33,543 op/s | 63,151 op/s | 0.53 |
+| mlkem512-decaps | 26,548 op/s | 40,118 op/s | 0.66 |
+| mlkem768-keygen | 24,576 op/s | 28,971 op/s | 0.85 |
+| mlkem768-encaps | 20,831 op/s | 43,862 op/s | 0.47 |
+| mlkem768-decaps | 16,864 op/s | 28,146 op/s | 0.60 |
+| mlkem1024-keygen | 15,822 op/s | 19,427 op/s | 0.81 |
+| mlkem1024-encaps | 13,932 op/s | 32,023 op/s | 0.44 |
+| mlkem1024-decaps | 11,510 op/s | 20,820 op/s | 0.55 |
+| pbkdf2-sha256-100k | 14.1 op/s | 87.2 op/s | 0.16 |
+| scrypt-n15-r8 | 17.5 op/s | 14.8 op/s | 1.18 |
+| argon2id-t1-64m-p4 | 33.3 op/s | 25.6 op/s | 1.30 |
+
+Where OpenSSL is far ahead it is mostly hardware: on this CPU it uses the
+AES, PMULL (GHASH) and SHA-1/SHA-2/SHA-3 instructions, and 64-bit-limb
+assembly with a 64x64->128 multiply for the curves and RSA. Goose has no
+intrinsics and no wide multiply, so this library runs table-free,
+constant-time AES and 32-bit limbs. OpenSSL's ML-KEM also keeps the
+expanded matrix with the key, which encapsulation and decapsulation here
+rebuild each time. Where neither side has special instructions (BLAKE2,
+RC4, scrypt, Argon2) the two are even or Goose is ahead. RSA-2048 key
+generation takes about 0.4 s on average (30 to 870 ms over eight runs).
 
 ### Caveats
 
@@ -404,6 +541,32 @@ python3 scripts/gen_vectors.py          # regenerate test/vectors from Python's 
   openssl byte for byte. openssl's ciphertexts must decapsulate to its
   secrets, and changed ones to its implicit rejection keys. Malformed keys
   and ciphertexts must be refused.
+- `mldsa_vectors`: ML-DSA-44, -65 and -87 against openssl
+  (`scripts/parity_vectors.py`): public and expanded private keys from
+  seeds, deterministic signatures under empty, short and 255-byte contexts
+  reproduced byte for byte (directly and through external mu), hedged
+  signatures, and changed ones that must fail, malformed hint encodings
+  among them. Go's crypto/mldsa agrees with every line.
+- `hpke_vectors`: RFC 9180's test vectors in all four modes (DHKEM over
+  P-256, P-521 and X25519; HKDF-SHA256 and -SHA512; every AEAD and
+  export-only) and Go's post-quantum ones (ML-KEM-512/768/1024, the three
+  hybrids, the SHAKE KDFs, DHKEM P-384): derived key pairs, encapsulation,
+  the key schedule, seals up to sequence number 256, and exports. Then
+  fresh keys through every KEM, and refusals: tampered messages and
+  encapsulated keys, wrong info or PSK, modes a KEM or KDF does not allow.
+- `dsa_vectors`: DSA against openssl at (1024, 160), (2048, 224), (2048,
+  256) and (3072, 256): RFC 6979 signatures over SHA-1 to SHA-512 digests
+  (longer and shorter than q) reproduced byte for byte and through DER,
+  openssl's random-nonce signatures, changed ones that must fail, and
+  parameters generated here. Go's crypto/dsa agrees with every line.
+- `xcrypto_vectors`: vectors from Go's x/crypto itself
+  (`scripts/govectors`, run offline against the module cache): MD4 and
+  RIPEMD-160 around the block boundaries, Salsa20, XSalsa20, HSalsa20,
+  every NaCl construction (opened again, and refused when changed),
+  bcrypt hashes recomputed from their salts, Blowfish, CAST5, Twofish, TEA
+  and XTEA blocks and CBC, and AES-XTS; RC2-CBC at 40, 64 and 128
+  effective bits from openssl; RFC 2268's RC2 and RFC 2144's CAST-128
+  vectors.
 - `ec_vectors`: P-256, P-384 and P-521 multiples of the generator (1, 2, n − 2,
   n − 1 and random ones), ECDH, and ECDSA matching RFC 6979 byte for byte.
   Signatures also go through DER and back. Off-curve points, bad
@@ -462,5 +625,7 @@ then `../goose.git/build/goose`.
 - `examples/aes_gcm_demo.goose`: sealing, opening and tamper detection, and throughput.
 - `examples/ecc_demo.goose`: ECDHE and ECDSA on P-256 and P-384, Ed25519,
   and HKDF, timed.
+- `examples/speed.goose`: every primitive's throughput or rate, one line
+  each; `scripts/speed_vs_openssl.py` sets it against openssl.
 - `examples/bench.goose`: schoolbook vs Karatsuba by size, 10000!, 2048-bit
   modpow.
