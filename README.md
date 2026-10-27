@@ -508,7 +508,7 @@ generation takes about 0.4 s on average (30 to 870 ms over eight runs).
 python3 scripts/run_tests.py            # every test at -O0, -O2 and --debug, plus the examples
 python3 scripts/run_tests.py --native   # also built with the C compiler
 python3 scripts/gen_vectors.py          # regenerate test/vectors from Python's integers
-tools/govectors.sh --check              # xcrypto.txt against Go's x/crypto (needs Go)
+tools/govectors.sh -check test/vectors/xcrypto.txt   # xcrypto.txt against Go's x/crypto (needs Go)
 tools/govectors.sh > test/vectors/xcrypto.txt   # regenerate it
 ```
 
@@ -570,10 +570,11 @@ tools/govectors.sh > test/vectors/xcrypto.txt   # regenerate it
   parameters generated here. Go's crypto/dsa agrees with every line.
 - `xcrypto_vectors`: vectors from Go's x/crypto itself
   (`tools/govectors`, run offline against the module cache by
-  `tools/govectors.sh`, whose `--check` compares instead): MD4 and
+  `tools/govectors.sh`, whose `-check` compares instead): MD4 and
   RIPEMD-160 around the block boundaries, Salsa20, XSalsa20, HSalsa20,
   every NaCl construction (opened again, and refused when changed),
-  bcrypt hashes recomputed from their salts, bcrypt_pbkdf (with
+  bcrypt hashes recomputed from their salts (and, by `-check`, verified by
+  Go's bcrypt), bcrypt_pbkdf (with
   OpenBSD's vectors) at lengths around its 32-byte blocks, Blowfish, CAST5, Twofish, TEA
   and XTEA blocks and CBC, and AES-XTS; RC2-CBC at 40, 64 and 128
   effective bits from openssl; RFC 2268's RC2 and RFC 2144's CAST-128
