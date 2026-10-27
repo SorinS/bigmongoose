@@ -28,6 +28,10 @@ language, written in Goose: a foundation for cryptography.
 - **`bignum.dsa`**: DSA (FIPS 186-4), for legacy keys: parameters, keys,
   random-nonce and deterministic (RFC 6979) signatures; constant-time
   signing.
+- **`bignum.ffdh`**: finite-field Diffie-Hellman over RFC 3526's MODP
+  groups 14, 15 and 16 (2048, 3072 and 4096 bits), as SSH uses them: keys,
+  the peer value's range check, and the shared secret, the secret exponent
+  raised in constant time.
 - **`bignum.aes`**: AES-128/192/256 and CTR mode, bitsliced, constant time.
 - **`bignum.gcm`**: AES-GCM authenticated encryption, constant time.
 - **`bignum.modes`**: CBC, CFB, OFB and CTR over any of the block ciphers,
