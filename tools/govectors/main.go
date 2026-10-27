@@ -1,11 +1,13 @@
 // Vectors from Go's golang.org/x/crypto for the packages bignum matches:
 // MD4, RIPEMD-160, Salsa20 and XSalsa20, HSalsa20, NaCl secretbox, box
 // (and its anonymous form), sign and auth, bcrypt, Blowfish, CAST5,
-// Twofish, TEA, XTEA and AES-XTS. One line a case on stdout; the random
+// Twofish, TEA, XTEA, AES-XTS and bcrypt_pbkdf (x/crypto/ssh's internal
+// package, copied to internal/bcrypt_pbkdf). One line a case on stdout; the random
 // stream is fixed, so the output is too (bcrypt aside, whose salts come
 // from crypto/rand; its lines are checked by recomputing from the salt).
 //
-//	cd scripts/govectors && GOFLAGS=-mod=mod GOPROXY=off go run . > ../../test/vectors/xcrypto.txt
+//	tools/govectors.sh           # writes test/vectors/xcrypto.txt
+//	tools/govectors.sh --check   # compares with it instead
 package main
 
 import (
@@ -33,6 +35,8 @@ import (
 	"golang.org/x/crypto/twofish"
 	"golang.org/x/crypto/xtea"
 	"golang.org/x/crypto/xts"
+
+	"govectors/internal/bcrypt_pbkdf"
 )
 
 var rng = rand.New(rand.NewChaCha8([32]byte{'g', 'o', 'o', 's', 'e'}))
@@ -201,5 +205,28 @@ func main() {
 			c.Encrypt(ct, pt, sector)
 			line("xts", key, sector, pt, ct)
 		}
+	}
+
+	// bcrypt_pbkdf: OpenBSD's three vectors (Go's tests), then lengths
+	// around its 32-byte blocks and the 48 bytes of aes256-ctr's key and IV.
+	type pbkdf struct {
+		pw, salt []byte
+		rounds, n int
+	}
+	cases := []pbkdf{
+		{[]byte("password"), []byte("salt"), 12, 32},
+		{[]byte("passwordy\x00PASSWORD\x00"), []byte("salty\x00SALT\x00"), 3, 32},
+		{[]byte("секретное слово"), []byte("посолить немножко"), 8, 88},
+	}
+	for i, n := range []int{1, 16, 31, 32, 33, 48, 64, 65, 100} {
+		cases = append(cases, pbkdf{rb(1 + rng.IntN(40)), rb(16), 1 + i%3, n})
+	}
+	cases = append(cases, pbkdf{rb(72), rb(1), 16, 48})
+	for _, p := range cases {
+		k, err := bcrypt_pbkdf.Key(p.pw, p.salt, p.rounds, p.n)
+		if err != nil {
+			panic(err)
+		}
+		line("bcrypt_pbkdf", p.pw, p.salt, p.rounds, k)
 	}
 }

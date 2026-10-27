@@ -1,13 +1,15 @@
 // bignum.bcrypt: bcrypt password hashing (Provos and Mazieres, 1999), as
 // Go's x/crypto/bcrypt has it: "$2a$" hashes with a cost of 4 to 31 and a
 // 16-byte salt, passwords up to 72 bytes, and comparison that accepts the
-// $2b$ and $2y$ spellings too.
+// $2b$ and $2y$ spellings too. And bcrypt_pbkdf, OpenBSD's key derivation
+// on it, which OpenSSH uses for passphrase-protected keys.
 
 namespace bignum;
 
 import std;
 import ct;
 import blowfish;
+import sha512;
 import entropy;
 
 let BCRYPT_MIN_COST: i64 = 4;
@@ -140,4 +142,59 @@ fn bcrypt_verify(h: const u8[:], password: const u8[:]) -> bool {
 fn bcrypt_cost(h: const u8[:]) -> i64 {
     let minor, cost, salt, at, ok = bcrypt_parse(h);
     return if ok { cost } else { -1 };
+}
+
+// bcrypt_pbkdf's hash of a SHA-512'd password and salt: the cipher
+// expanded with both 64 times, then "OxychromaticBlowfishSwatDynamite"
+// encrypted 64 times, its words written little-endian.
+fn bcrypt_pbkdf_hash(shapass: const u8[:], shasalt: const u8[:]) -> u8[32] {
+    var c = blowfish_init_salted(shapass, shasalt);
+    for i in 64 {
+        blowfish_expand(c, shasalt);
+        blowfish_expand(c, shapass);
+    }
+    let magic: const u8[:] = "OxychromaticBlowfishSwatDynamite";
+    var out: u8[32] = [0; 32];
+    for b in 4 {
+        var l = bf_load(magic, 8 * b);
+        var r = bf_load(magic, 8 * b + 4);
+        for j in 64 {
+            let nl, nr = bf_encrypt_words(c, l, r);
+            l = nl;
+            r = nr;
+        }
+        for k in 4 {
+            out[8 * b + k] = (l >> (8 * k)) as! u8;
+            out[8 * b + 4 + k] = (r >> (8 * k)) as! u8;
+        }
+    }
+    return out;
+}
+
+// bcrypt_pbkdf(3): key_len bytes (at most 1024) from a password and salt
+// (neither empty) and a number of rounds (at least 1). The 32-byte blocks
+// are interleaved, byte i of block b going to i * blocks + b. False for
+// arguments out of range.
+fn bcrypt_pbkdf(password: const u8[:], salt: const u8[:], rounds: i64, key_len: i64) -> u8[>..], bool {
+    var key: u8[>..] = [];
+    if rounds < 1 || password.len == 0 || salt.len == 0 || salt.len > 1 << 20 || key_len < 0 || key_len > 1024 {
+        return key, false;
+    }
+    let blocks = (key_len + 31) / 32;
+    key.resize(blocks * 32, 0);
+    let shapass = sha512(password);
+    for n in 1..blocks + 1 {
+        var counted: u8[>..] = [];
+        counted.append(salt);
+        for k in 4 { counted.push((n >> (24 - 8 * k)) as! u8); }
+        var tmp = bcrypt_pbkdf_hash(shapass, sha512(counted));
+        var out = tmp;
+        for i in 1..rounds {
+            tmp = bcrypt_pbkdf_hash(shapass, sha512(tmp));
+            for j in 32 { out[j] ^= tmp[j]; }
+        }
+        for j in 32 { key[j * blocks + n - 1] = out[j]; }
+    }
+    key.resize(key_len, 0);
+    return key, true;
 }

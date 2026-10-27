@@ -1,8 +1,9 @@
-// vectors/xcrypto.txt, from Go's golang.org/x/crypto (scripts/govectors):
+// vectors/xcrypto.txt, from Go's golang.org/x/crypto (tools/govectors):
 // MD4 and RIPEMD-160 at lengths around the block boundaries; Salsa20,
 // XSalsa20 and HSalsa20; NaCl secretbox, box and its anonymous form, sign
 // and auth, each opened again and refused when changed; bcrypt hashes
-// recomputed from their salts; Blowfish, CAST5, Twofish, TEA and XTEA
+// recomputed from their salts; bcrypt_pbkdf (OpenBSD's vectors among
+// them); Blowfish, CAST5, Twofish, TEA and XTEA
 // blocks both ways and in CBC; AES-XTS sectors. vectors/rc2.txt: RC2-CBC
 // at 40, 64 and 128 effective bits, from openssl. Then RFC 2268's RC2
 // vectors and RFC 2144's CAST-128 one.
@@ -154,6 +155,10 @@ fn main() {
             let minor, cost, salt, at, ok = bignum::bcrypt_parse(h);
             let again, oka = bignum::bcrypt_hash_with(pw, cost, salt);
             check("bcrypt from its salt", ok && oka && again == h);
+        } else if kind == "bcrypt_pbkdf" {
+            let want = unhex(w[4]);
+            let k, ok = bignum::bcrypt_pbkdf(unhex(w[1]), unhex(w[2]), num(w[3]), want.len);
+            check("bcrypt_pbkdf", ok && k == want);
         } else if kind == "blowfish" {
             let c = bignum::blowfish_init(unhex(w[1]));
             check("blowfish", block_ok(c, unhex(w[2]), unhex(w[3])));
@@ -221,6 +226,11 @@ fn main() {
     check("bcrypt cost 32", !okc);
     let hd, okd = bignum::bcrypt_hash_with("pw", 2, none);
     check("bcrypt default cost", okd && bignum::bcrypt_cost(hd) == 10);
+    let p0, okp0 = bignum::bcrypt_pbkdf("pw", "salt", 0, 32);
+    let p1, okp1 = bignum::bcrypt_pbkdf("", "salt", 1, 32);
+    let p2, okp2 = bignum::bcrypt_pbkdf("pw", "", 1, 32);
+    let p3, okp3 = bignum::bcrypt_pbkdf("pw", "salt", 1, 1025);
+    check("bcrypt_pbkdf limits", !okp0 && !okp1 && !okp2 && !okp3);
     check("bcrypt malformed", !bignum::bcrypt_verify("$2a$04$short", "pw") && bignum::bcrypt_cost("$3a$04$") == -1);
     print("xcrypto vectors: ", checks, " checks, ", failures, " failed");
     assert(failures == 0);

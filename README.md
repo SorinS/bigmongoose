@@ -58,7 +58,8 @@ language, written in Goose: a foundation for cryptography.
   BLAKE2Xs XOFs.
 - **`bignum.hmac`**: one-shot hashing, HMAC, HKDF and MGF1 over any of them.
 - **`bignum.kdf`**: PBKDF2 and scrypt.
-- **`bignum.bcrypt`**: bcrypt password hashes, as Go's x/crypto/bcrypt.
+- **`bignum.bcrypt`**: bcrypt password hashes, as Go's x/crypto/bcrypt, and
+  bcrypt_pbkdf (OpenBSD's KDF for OpenSSH's encrypted keys).
 - **`bignum.argon2`**: Argon2id, Argon2i and Argon2d (RFC 9106).
 - **`bignum.entropy`**: random bytes from the OS (`getentropy`), for keys.
 
@@ -382,7 +383,9 @@ few lines on top of `hkdf_expand` and is not included.
   `nacl_sign_open`; `nacl_auth(msg, key)` and `nacl_auth_verify`.
 - `bcrypt_hash(password, cost = 10) -> hash, ok` ("$2a$", false past 72
   bytes or for a cost above 31), `bcrypt_verify(hash, password)` (in
-  constant time; $2b$ and $2y$ too) and `bcrypt_cost(hash)`.
+  constant time; $2b$ and $2y$ too) and `bcrypt_cost(hash)`;
+  `bcrypt_pbkdf(password, salt, rounds, key_len) -> key, ok` (false for
+  an empty password or salt, rounds below 1 or a key over 1024 bytes).
 - `blowfish_init(key)`, `cast5_init(key16)`, `twofish_init(key)`,
   `tea_init(key, rounds = 64)`, `xtea_init(key)`, `rc2_init(key,
   effective_bits)`, each with `_encrypt_block` / `_decrypt_block` and
@@ -505,6 +508,7 @@ generation takes about 0.4 s on average (30 to 870 ms over eight runs).
 python3 scripts/run_tests.py            # every test at -O0, -O2 and --debug, plus the examples
 python3 scripts/run_tests.py --native   # also built with the C compiler
 python3 scripts/gen_vectors.py          # regenerate test/vectors from Python's integers
+tools/govectors.sh --check              # xcrypto.txt against Go's x/crypto (needs Go)
 ```
 
 - `bigint_vectors`: about 7,900 differential checks against Python ints,
@@ -564,10 +568,12 @@ python3 scripts/gen_vectors.py          # regenerate test/vectors from Python's 
   openssl's random-nonce signatures, changed ones that must fail, and
   parameters generated here. Go's crypto/dsa agrees with every line.
 - `xcrypto_vectors`: vectors from Go's x/crypto itself
-  (`scripts/govectors`, run offline against the module cache): MD4 and
+  (`tools/govectors`, run offline against the module cache by
+  `tools/govectors.sh`; `--check` compares instead of writing): MD4 and
   RIPEMD-160 around the block boundaries, Salsa20, XSalsa20, HSalsa20,
   every NaCl construction (opened again, and refused when changed),
-  bcrypt hashes recomputed from their salts, Blowfish, CAST5, Twofish, TEA
+  bcrypt hashes recomputed from their salts, bcrypt_pbkdf (with
+  OpenBSD's vectors) at lengths around its 32-byte blocks, Blowfish, CAST5, Twofish, TEA
   and XTEA blocks and CBC, and AES-XTS; RC2-CBC at 40, 64 and 128
   effective bits from openssl; RFC 2268's RC2 and RFC 2144's CAST-128
   vectors.

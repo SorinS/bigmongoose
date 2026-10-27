@@ -1,6 +1,6 @@
 """Vectors for the primitives added for parity with Go's crypto: ML-DSA
 (mldsa.txt), HPKE (hpke.txt), DSA (dsa.txt) and RC2 (rc2.txt, from
-openssl's legacy provider; scripts/govectors makes xcrypto.txt from Go's
+openssl's legacy provider; tools/govectors makes xcrypto.txt from Go's
 x/crypto for the rest of the x/crypto ciphers and hashes). Each file has a random stream of its
 own, so adding one changes no other.
 
