@@ -509,6 +509,7 @@ python3 scripts/run_tests.py            # every test at -O0, -O2 and --debug, pl
 python3 scripts/run_tests.py --native   # also built with the C compiler
 python3 scripts/gen_vectors.py          # regenerate test/vectors from Python's integers
 tools/govectors.sh --check              # xcrypto.txt against Go's x/crypto (needs Go)
+tools/govectors.sh > test/vectors/xcrypto.txt   # regenerate it
 ```
 
 - `bigint_vectors`: about 7,900 differential checks against Python ints,
@@ -569,7 +570,7 @@ tools/govectors.sh --check              # xcrypto.txt against Go's x/crypto (nee
   parameters generated here. Go's crypto/dsa agrees with every line.
 - `xcrypto_vectors`: vectors from Go's x/crypto itself
   (`tools/govectors`, run offline against the module cache by
-  `tools/govectors.sh`; `--check` compares instead of writing): MD4 and
+  `tools/govectors.sh`, whose `--check` compares instead): MD4 and
   RIPEMD-160 around the block boundaries, Salsa20, XSalsa20, HSalsa20,
   every NaCl construction (opened again, and refused when changed),
   bcrypt hashes recomputed from their salts, bcrypt_pbkdf (with

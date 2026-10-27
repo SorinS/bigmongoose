@@ -6,7 +6,7 @@
 // stream is fixed, so the output is too (bcrypt aside, whose salts come
 // from crypto/rand; its lines are checked by recomputing from the salt).
 //
-//	tools/govectors.sh           # writes test/vectors/xcrypto.txt
+//	tools/govectors.sh > test/vectors/xcrypto.txt
 //	tools/govectors.sh --check   # compares with it instead
 package main
 
