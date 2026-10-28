@@ -4,7 +4,8 @@
 Every test/*.goose runs under the in-process JIT at -O0 and -O2 and with
 --debug (overflow, range and bounds checks); a test passes when it exits 0
 and, if test/expected/<name>.txt exists, prints exactly that. The examples
-run once. --native also builds and runs the tests with the C compiler.
+run once, and scripts/ct_audit.py checks BigInt's callers. --native also
+builds and runs the tests with the C compiler.
 
     python3 scripts/run_tests.py [--goose PATH] [--native] [--update] [-k NAME]
 
@@ -95,6 +96,9 @@ def main():
     for e in examples:
         rc, out, err = run([goose, e, "--", *EXAMPLE_ARGS.get(e[:-6], [])], os.path.join(ROOT, "examples"))
         check(f"examples/{e}", rc, out, err, None)
+
+    rc, out, err = run([sys.executable, os.path.join(ROOT, "scripts", "ct_audit.py")], ROOT)
+    check("scripts/ct_audit.py", rc, out, err, None)
 
     print(f"\n{passed} passed, {len(failed)} failed")
     sys.exit(1 if failed else 0)

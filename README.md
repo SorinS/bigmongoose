@@ -8,7 +8,8 @@ language, written in Goose: a foundation for cryptography.
   operations, text in bases 2–36, and bytes. Variable-time, so never use it
   on secrets.
 - **`bignum.ct`**: constant-time building blocks over fixed-width limb
-  slices (masks, select, swap, compare, modular add/sub).
+  slices (masks, select, swap, compare, modular add/sub, small moduli,
+  exact division).
 - **`bignum.mont`**: constant-time Montgomery arithmetic for an odd modulus
   (multiply, exponentiate, reduce).
 - **`bignum.x25519`**: X25519 Diffie-Hellman (RFC 7748), constant time.
@@ -24,10 +25,12 @@ language, written in Goose: a foundation for cryptography.
   P-256/384/521 and X25519, ML-KEM and the ML-KEM hybrids (X-Wing among
   them), HKDF and SHAKE KDFs, AES-GCM, ChaCha20-Poly1305 and export-only.
 - **`bignum.rsa`**: RSA (RFC 8017): key generation, PKCS #1 v1.5 and PSS
-  signatures, OAEP and PKCS #1 v1.5 encryption; constant-time private key.
+  signatures, OAEP and PKCS #1 v1.5 encryption; everything that touches a
+  private key (the private operation, loading, generating) in constant
+  time.
 - **`bignum.dsa`**: DSA (FIPS 186-4), for legacy keys: parameters, keys,
   random-nonce and deterministic (RFC 6979) signatures; constant-time
-  signing.
+  keys, nonces and signing.
 - **`bignum.ffdh`**: finite-field Diffie-Hellman over RFC 3526's MODP
   groups 14, 15 and 16 (2048, 3072 and 4096 bits), as SSH uses them: keys,
   the peer value's range check, and the shared secret, the secret exponent
@@ -164,18 +167,30 @@ only branches are on lengths and public counters. One X25519 takes about
 85 µs in a native build (Apple Silicon, clang -O2).
 
 `bignum.ct` holds masks, `ct_select`, `ct_cswap`, `ct_eq`, `ct_lt`,
-`ct_add`/`ct_sub` with carry out, `ct_cond_sub`, and `ct_mod_add`/`ct_mod_sub`,
-all over `u32[:]` of a public length. `bignum.mont` builds on them:
-`mont_mul` (CIOS), `mont_r2` (R² mod m by doubling, so no division by a
-secret modulus), `ct_reduce` (a wide number mod m, a bit at a time), `ct_mul`,
-and `mont_modexp`, which uses a 4-bit window over every bit of the
-exponent's width and reads its table by scanning all 16 entries.
+`ct_is_zero`/`ct_is_one`, `ct_add`/`ct_sub` with carry out and their masked
+forms, `ct_shr1`, `ct_cond_sub`, `ct_mod_add`/`ct_mod_sub`, `ct_mod_small` (a
+number mod a public d < 2^16 by multiplying, since a division instruction's
+time can follow its operands) and `ct_div_exact` (by a public odd e that
+divides exactly, by multiplying with 1/e mod 2^32), all over `u32[:]` of a
+public length. `bignum.mont` builds on them: `mont_mul` (CIOS), `mont_r2`
+(R² mod m by doubling, so no division by a secret modulus), `ct_reduce` (a
+wide number mod any m, a bit at a time), `ct_mul`, `mont_modexp`, which
+uses a 4-bit window over every bit of the exponent's width and reads its
+table by scanning all 16 entries, and `ct_mod_inv` (1/a mod an odd m by
+Möller's constant-time binary Euclid, GMP's `mpn_sec_invert`: 64 steps per
+limb whatever the values).
+
+Every other module may call `BigInt` only on public values, and
+`scripts/ct_audit.py` (run by `run_tests.py`) holds the list of the
+functions that do, each with its reason; a new call fails it until it is
+looked at. Variable-time helpers outside `bignum.goose` end in `_vartime`,
+as Go's do.
 
 ### RSA
 
 | Group | Functions |
 |---|---|
-| Keys | `rsa_generate(bits, e = 65537)` (1024 to 4096, a multiple of 64), `rsa_key_from(n, e, d, p, q) -> key, bool`, `rsa_public_from(n, e) -> pub, bool`, `rsa_public(key)`, `rsa_bits`, `rsa_size` |
+| Keys | `rsa_generate(bits, e = 65537)` (1024 to 4096, a multiple of 64; e odd, below 2^32), `rsa_key_from(n, e, d, p, q) -> key, bool`, `rsa_key_from_bytes(n, e, d, p, q)` (big-endian, as PKCS #1 holds them), `rsa_public_from(n, e) -> pub, bool`, `rsa_public(key)`, `rsa_bits`, `rsa_size` |
 | PKCS #1 v1.5 | `rsa_sign_pkcs1(key, msg, hash = 256)`, `rsa_verify_pkcs1(pub, msg, sig, hash = 256)` |
 | PSS | `rsa_sign_pss(key, msg, salt_len = -1, hash = 256)`, `rsa_sign_pss_with_salt(key, msg, salt, hash = 256)`, `rsa_verify_pss(pub, msg, sig, salt_len = -1, hash = 256)`; a salt_len of -1 means the hash's length |
 | OAEP | `rsa_encrypt_oaep(pub, msg, label = "", hash = 256)`, `rsa_encrypt_oaep_with_seed`, `rsa_decrypt_oaep(key, ct, label = "", hash = 256) -> msg, bool`, `rsa_oaep_max(key, hash = 256)` |
@@ -186,9 +201,17 @@ exponent's width and reads its table by scanning all 16 entries.
 and OAEP run MGF1 on the same hash. A key is fixed-size limb
 arrays (`u32[..128]`, so at most 4096 bits), and every function that only
 needs the public half accepts a private key as well. The private operation
-works by CRT. It blinds its input with r^e for a random r, and checks the
-result against the public exponent before releasing it, so a fault in one
-CRT half cannot leak a prime. PKCS #1 v1.5 signatures are verified by
+works by CRT. It blinds its input with r^e for a random r (r and 1/r drawn
+and computed in constant time), and checks the result against the public
+exponent before releasing it, so a fault in one CRT half cannot leak a
+prime. Loading a key derives dp, dq and qinv (by Fermat) and makes every
+check without branching on the numbers; only the verdict is branched on.
+Key generation draws p = 3 mod 4 (so Miller-Rabin is one exponentiation
+per round), divides by the small primes by multiplying, tests gcd(p − 1, e)
+with `ct_mod_inv`, and takes d = 1/e mod (p − 1)(q − 1) through the public
+e: with k = −1/φ mod e, d = (1 + kφ)/e. That is the RSA paper's d, as Go's
+crypto/rsa had it before its FIPS module, which takes 1/e mod lcm(p − 1,
+q − 1) in variable time instead. Only candidates that fail are branched on. PKCS #1 v1.5 signatures are verified by
 rebuilding the encoding and comparing it whole. OAEP decryption checks
 every field in constant time and reports one failure flag. PKCS #1 v1.5
 decryption checks its padding in constant time too, but saying whether
@@ -208,7 +231,10 @@ in place, with no difference in time or path. Use OAEP for anything new.
 `dsa_verify(key, digest, sig)` checks an r ‖ s signature. Digests are cut
 to q's leftmost bits, as FIPS 186 and openssl do; Go leaves that to the
 caller. `dsa_sig_to_der` and `dsa_sig_from_der` convert to and from the
-DER form that X.509 and openssl use.
+DER form that X.509 and openssl use. x and the nonces are drawn below q,
+checked against it and used in constant time (a nonce's length leaking
+over many signatures is enough to recover x, as the Minerva attacks
+showed); only the public parameters go through `BigInt`.
 
 ### AES and GCM
 
@@ -483,23 +509,22 @@ constant-time AES and 32-bit limbs. OpenSSL's ML-KEM also keeps the
 expanded matrix with the key, which encapsulation and decapsulation here
 rebuild each time. Where neither side has special instructions (BLAKE2,
 RC4, scrypt, Argon2) the two are even or Goose is ahead. RSA-2048 key
-generation takes about 0.4 s on average (30 to 870 ms over eight runs).
+generation takes about 0.27 s on average (ten runs, in constant time).
 
 ### Caveats
 
 - A C compiler can turn mask arithmetic back into branches, so check the
-  assembly of anything that matters.
+  assembly of anything that matters; `scripts/ct_timing.py` measures the
+  code as built.
 - The P-256/P-384 code is generic over the prime. On the same machine,
   OpenSSL's ECDH (specialized, with assembly) is 27 times faster on P-256
   and 15 times faster on P-384.
 - Point compression is not supported. TLS 1.3 sends only uncompressed
   points.
-- Key generation and `rsa_key_from` use `BigInt` on the primes, and the
-  blinding factor's inverse comes from `BigInt.modinv`, so those steps are
-  not constant time. The private operation itself is.
 - Secrets are not wiped from memory.
 - `entropy` needs `getentropy` (macOS, Linux, BSDs), so it does not work on
-  Windows.
+  Windows. It opens the C library at startup (`extern "c"`, mapped to
+  `libc.so.6` on Linux by `bignum.build`), so `goose run` has it too.
 - This code has not been audited.
 
 ## Tests
@@ -507,6 +532,8 @@ generation takes about 0.4 s on average (30 to 870 ms over eight runs).
 ```bash
 python3 scripts/run_tests.py            # every test at -O0, -O2 and --debug, plus the examples
 python3 scripts/run_tests.py --native   # also built with the C compiler
+python3 scripts/ct_audit.py             # BigInt only on public values (run_tests.py runs it)
+python3 scripts/ct_timing.py [scale]    # timing tests of the constant-time code (about 10 s)
 python3 scripts/gen_vectors.py          # regenerate test/vectors from Python's integers
 tools/govectors.sh -check test/vectors/xcrypto.txt   # xcrypto.txt against Go's x/crypto (needs Go)
 tools/govectors.sh > test/vectors/xcrypto.txt   # regenerate it
@@ -518,15 +545,25 @@ tools/govectors.sh > test/vectors/xcrypto.txt   # regenerate it
   Algorithm D's correction steps.
 - `bigint_api`: conversion limits, in-place forms (aliased too), parse
   errors, bytes and identities.
-- `ct_ops`: the constant-time helpers against `BigInt`.
+- `ct_ops`: the constant-time helpers against `BigInt`, `ct_mod_small`,
+  `ct_div_exact` and the masked forms among them.
+- `timing/ct_timing` (`scripts/ct_timing.py`, not in run_tests.py): dudect's
+  method (Reparaz, Balasch and Verbauwhede, 2017). Each operation runs on
+  one fixed input and on random ones, interleaved at random, and Welch's
+  t-test compares their times, whole and cut at percentiles; |t| above 10
+  is a leak. It covers `mont_modexp` (exponent 0 against random),
+  `ct_mod_inv`, `ct_mod_small`, the RSA private operation, RSA key loading,
+  X25519, ECDSA on P-256 and Ed25519 signing. BigInt's `modpow` runs as a
+  control and must be caught (it is, at |t| near 500; the others stay
+  below 2).
 - `x25519_field`: GF(2^255 − 19) arithmetic against `BigInt`, including
   non-canonical encodings.
 - `x25519_rfc`: the RFC 7748 §5.2 vectors (with the 1,000-iteration chain)
   and the §6.1 key agreement.
 - `x25519_vectors`: random scalars and u-coordinates against a Python
   transcription of RFC 7748.
-- `mont_ops`: Montgomery multiply, exponentiation, R², reduction and
-  products against `BigInt`.
+- `mont_ops`: Montgomery multiply, exponentiation, R², reduction,
+  products and `ct_mod_inv` (invertible or not) against `BigInt`.
 - `sha256_vectors`: every length up to 129 bytes and longer ones, one-shot
   and in pieces, against hashlib; MGF1.
 - `aes_vectors`: the S-box and its inverse on all 256 bytes, blocks at each
