@@ -11,8 +11,21 @@
 // input): use the in-place forms (`add_to`, `mul_to`, ...) or assign
 // `copy()` of a separate result.
 //
-// This layer is variable-time: never use it on secret data. The
-// constant-time layer is `bignum.ct` and `bignum.x25519`.
+// This layer is variable-time: never use it on secret data. Its time
+// follows the values (their lengths, an exponent's bits, a quotient's
+// corrections), so it is for public values only. Secrets go through the
+// constant-time layer:
+// - `bignum.ct`: masks, selects, swaps, comparisons, fixed-width add and
+//   subtract;
+// - `bignum.mont`: Montgomery arithmetic, reduction, `mont_modexp`;
+// - `bignum.x25519`, and `bignum.ed25519` signing;
+// - `bignum.ec`: ECDH and ECDSA signing on the NIST curves;
+// - the private-key side of `bignum.rsa` (CRT, blinded), `bignum.dsa`
+//   (signing) and `bignum.ffdh`, built on `ct` and `mont`;
+// - `bignum.aes`, `bignum.gcm`, `bignum.des`, `bignum.mlkem` and
+//   `bignum.mldsa` need no bignum, and are constant time themselves.
+// RSA key generation and key loading still use this layer on the primes
+// (rsa.goose).
 
 namespace bignum;
 
