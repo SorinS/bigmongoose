@@ -83,6 +83,53 @@ fn main() {
             check("select", out == a);
         }
     }
+    // ct_mod_small, ct_div_exact, ct_is_one and the masked add, subtract
+    // and shift, against BigInt.
+    var r = rng { 11 };
+    for n in 1..10 {
+        for t in 20 {
+            var a: u32[>..] = [];
+            for i in n { a.push(if t == 0 { 4294967295 } else if t == 1 { 0 } else { r.rand_u64() as! u32 }); }
+            let av = bignum::big_of(a);
+            for d in [2, 3, 7, 1999, 65521, 65535] {
+                let dv = d as u32;
+                check("mod_small", bignum::cmp_i64(bignum::rem(av, bignum::big(d)), bignum::ct_mod_small(a, dv)) == 0);
+            }
+            let e = (r.rand_u64() as! u32) | 1;
+            var prod: u32[>..] = [];
+            prod.resize(n + 1, 0);
+            var carry: u64 = 0;
+            for i in n + 1 {
+                let x: u64 = if i < n { a[i] } else { 0 };
+                let s = x * e + carry;
+                prod[i] = s as! u32;
+                carry = s >> 32;
+            }
+            var q: u32[>..] = [];
+            q.resize(n + 1, 0);
+            bignum::ct_div_exact(q, prod, e);
+            check("div_exact", bignum::eq(bignum::big_of(q), av));
+            check("is_one", bignum::ct_is_one(a) == (if bignum::cmp_i64(av, 1) == 0 { 1 } else { 0 }));
+            var b: u32[>..] = [];
+            for i in n { b.push(r.rand_u64() as! u32); }
+            let bv = bignum::big_of(b);
+            var s1 = copy(a);
+            let borrow = bignum::ct_sub_masked(s1, b, 0xffffffff);
+            let wrap = bignum::shl(bignum::one(), 32 * n);
+            check("sub_masked", bignum::eq(bignum::big_of(s1), bignum::mod_floor(bignum::sub(av, bv), wrap))
+                  && (borrow == 1) == bignum::lt(av, bv));
+            var s2 = copy(a);
+            check("sub_masked 0", bignum::ct_sub_masked(s2, b, 0) == 0 && s2 == a);
+            var s3 = copy(a);
+            let c = bignum::ct_add_masked(s3, b, 0xffffffff);
+            let sum = bignum::add(av, bv);
+            check("add_masked", bignum::eq(bignum::big_of(s3), bignum::mod_floor(sum, wrap))
+                  && (c == 1) == bignum::ge(sum, wrap));
+            var s4 = copy(a);
+            bignum::ct_shr1(s4);
+            check("shr1", bignum::eq(bignum::big_of(s4), bignum::shr(av, 1)));
+        }
+    }
     print("ct: ", checks, " checks, ", failures, " failed");
     assert(failures == 0);
 }

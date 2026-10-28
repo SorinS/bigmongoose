@@ -77,6 +77,30 @@ fn main() {
             var prod = limbs(bignum::zero(), 2 * n + 2);
             bignum::ct_mul(prod, limbs(a, n), limbs(b, n + 2));
             check("ct_mul", bignum::eq(value(prod), bignum::mul(a, b)));
+
+            // ct_mod_inv: x, 0, 1, m - 1 and another random value; the
+            // all-ones moduli have small factors, so some are not invertible.
+            for k in 5 {
+                let v = if k == 0 { copy(x) } else if k == 1 { bignum::zero() } else if k == 2 { bignum::one() }
+                        else if k == 3 { bignum::sub(m, bignum::one()) } else { bignum::mod_floor(random_limbs(r, n), m) };
+                var inv = limbs(bignum::zero(), n);
+                let ok = bignum::ct_mod_inv(inv, limbs(v, n), ml);
+                let want, want_ok = bignum::modinv(v, value(ml));
+                check("ct_mod_inv ok", (ok == 1) == want_ok);
+                check("ct_mod_inv", if want_ok { bignum::eq(value(inv), want) } else { bignum::is_zero(value(inv)) });
+            }
+            // Not invertible: a shares the factor g with m = g h.
+            if n >= 2 {
+                let g = bignum::bit_or(random_limbs(r, 1), bignum::one());
+                let h = bignum::bit_or(random_limbs(r, n - 1), bignum::one());
+                let gh = bignum::mul(g, h);
+                let w = gh.mag.len;
+                let a2 = bignum::mul(g, bignum::big(5));
+                if bignum::cmp_i64(g, 1) > 0 && bignum::lt(a2, gh) {
+                    var inv = limbs(bignum::zero(), w);
+                    check("ct_mod_inv factor", bignum::ct_mod_inv(inv, limbs(a2, w), limbs(gh, w)) == 0);
+                }
+            }
         }
     }
     print("mont ops: ", checks, " checks, ", failures, " failed");

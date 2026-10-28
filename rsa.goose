@@ -2,13 +2,20 @@
 // signatures and OAEP encryption with SHA-1, SHA-2 or SHA-3 (bignum.hmac's
 // hash ids), and PKCS #1 v1.5 encryption. Keys up to 4096 bits.
 //
-// The private-key operation is constant time: CRT with Montgomery
-// exponentiation from bignum.mont over limbs of the key's width, the
-// reductions done bit by bit, the input blinded by a random r^e, and the
-// result checked against the public key before it is released (a fault in
-// one CRT half would otherwise give the key away). Public-key operations
-// use BigInt, as nothing in them is secret. Key generation and key loading
-// use BigInt on the primes too, so they are not constant time.
+// Everything that touches a private key is constant time, on limbs of the
+// key's width (bignum.ct and bignum.mont), with only the key's size public:
+// - the private-key operation: CRT with Montgomery exponentiation, the
+//   reductions done bit by bit, the input blinded by a random r^e (r and
+//   1/r in constant time too), and the result checked against the public
+//   key before it is released (a fault in one CRT half would otherwise
+//   give the key away);
+// - loading a key (rsa_key_from, rsa_key_from_bytes): dp, dq and qinv
+//   derived and every check made without a branch on the numbers;
+// - generating one: candidates p = 3 mod 4, trial division without a
+//   division, Miller-Rabin on Montgomery exponentiation, and d = 1/e mod
+//   (p - 1)(q - 1) by way of the public e. Only candidates that fail are
+//   branched on, and they are thrown away.
+// Public-key operations use BigInt, as nothing in them is secret.
 
 namespace bignum;
 
@@ -75,43 +82,128 @@ fn rsa_public_from(n, e) -> RsaPublicKey, bool {
 }
 
 // A private key from n, e, d, p and q, with the CRT values derived and the
-// whole checked for consistency.
+// whole checked for consistency (rsa_key_from_limbs).
 fn rsa_key_from(n, e, d, p, q) -> RsaPrivateKey, bool {
-    var k = RsaPrivateKey { n: [], e: [], d: [], p: [], q: [], dp: [], dq: [], qinv: [] };
-    let pub, ok = rsa_public_from(n, e);
-    if !ok || p.neg || q.neg || d.neg || !is_odd(p) || !is_odd(q) || cmp_i64(p, 1) <= 0
-        || cmp_i64(q, 1) <= 0 || !eq(mul(p, q), n) || p.mag.len > 64 || q.mag.len > 64
-        || ge(d, n) {
-        return k, false;
+    if n.neg || e.neg || d.neg || p.neg || q.neg {
+        return RsaPrivateKey { n: [], e: [], d: [], p: [], q: [], dp: [], dq: [], qinv: [] }, false;
     }
-    let p1 = sub(p, one());
-    let q1 = sub(q, one());
-    let dp = mod_floor(d, p1);
-    let dq = mod_floor(d, q1);
-    let qinv, inv_ok = modinv(q, p);
-    if !inv_ok || !eq(mod_floor(mul(e, dp), p1), one()) || !eq(mod_floor(mul(e, dq), q1), one()) {
-        return k, false;
-    }
-    for x in pub.n { k.n.push(x); }
-    for x in pub.e { k.e.push(x); }
-    set_limbs(k.d, d, n.mag.len);
-    set_limbs(k.p, p, p.mag.len);
-    set_limbs(k.q, q, q.mag.len);
-    set_limbs(k.dp, dp, p.mag.len);
-    set_limbs(k.dq, dq, q.mag.len);
-    set_limbs(k.qinv, qinv, p.mag.len);
-    return k, true;
+    return rsa_key_from_limbs(n.mag, e.mag, d.mag, p.mag, q.mag);
 }
 
-// a mod d for a small d.
-fn limbs_mod_small(a: const u32[:], d: u32) -> u32 {
-    var r: u64 = 0;
-    var i = a.len;
-    while i > 0 {
-        i--;
-        r = ((r << 32) | a[i]) % d;
+// The same from big-endian bytes, as PKCS #1 holds them.
+fn rsa_key_from_bytes(n: const u8[:], e: const u8[:], d: const u8[:], p: const u8[:], q: const u8[:])
+        -> RsaPrivateKey, bool {
+    let nl = be_limbs(n);
+    let el = be_limbs(e);
+    let dl = be_limbs(d);
+    let pl = be_limbs(p);
+    let ql = be_limbs(q);
+    return rsa_key_from_limbs(nl, el, dl, pl, ql);
+}
+
+// Big-endian bytes as limbs, as many as they need once leading zero bytes
+// (a DER INTEGER's sign byte) are left out.
+fn be_limbs(b: const u8[:]) -> u32[>..] {
+    var i = 0;
+    while i < b.len && b[i] == 0 { i++; }
+    var r = zero_limbs((b.len - i + 3) / 4);
+    limbs_from_be(r, b[i..]);
+    return r;
+}
+
+// The number of limbs below the zero top ones. For lengths only: a key's
+// numbers are as long as its size says, which is public.
+fn limb_len(xs: const u32[:]) -> i64 {
+    var k = xs.len;
+    while k > 0 && xs[k - 1] == 0 { k--; }
+    return k;
+}
+
+// dst = xs, padded with zero limbs or cut to dst's width.
+fn put_limbs(dst: u32[:], xs: const u32[:]) {
+    for i in dst.len { dst[i] = if i < xs.len { xs[i] } else { 0 }; }
+}
+
+// 1 if e x == 1 mod m, else 0.
+fn ct_inverse_check(e: const u32[:], x: const u32[:], m: const u32[:]) -> u32 {
+    var ex = zero_limbs(e.len + x.len);
+    ct_mul(ex, e, x);
+    var r = zero_limbs(m.len);
+    ct_reduce(r, ex, m);
+    return ct_is_one(r);
+}
+
+// A private key from little-endian limbs, in constant time: dp = d mod
+// (p - 1) and dq = d mod (q - 1) by bitwise reduction, qinv = q^(p - 2)
+// mod p (Fermat), and the checks (p and q odd and above 1, p q = n,
+// d < n, e dp = 1 mod p - 1, e dq = 1 mod q - 1, qinv q = 1 mod p) made on
+// every value whatever the earlier ones gave. Only their outcome is
+// branched on, so a valid key takes the one path. The lengths (the key's
+// size) are public, and n and e.
+fn rsa_key_from_limbs(n: const u32[:], e: const u32[:], d: const u32[:], p: const u32[:], q: const u32[:])
+        -> RsaPrivateKey, bool {
+    var k = RsaPrivateKey { n: [], e: [], d: [], p: [], q: [], dp: [], dq: [], qinv: [] };
+    let pub, ok = rsa_public_from(big_of(n), big_of(e));
+    let nl = pub.n.len;
+    let pl = limb_len(p);
+    let ql = limb_len(q);
+    if !ok || pl == 0 || ql == 0 || pl > 64 || ql > 64 || pl + ql < nl || limb_len(d) > nl {
+        return k, false;
     }
-    return r as! u32;
+    let pn = p[..pl];
+    let qn = q[..ql];
+    var good = pn[0] & qn[0] & 1 & (ct_is_one(pn) ^ 1) & (ct_is_one(qn) ^ 1);
+    var pq = zero_limbs(pl + ql);
+    ct_mul(pq, pn, qn);
+    var nw = zero_limbs(pl + ql);
+    put_limbs(nw, pub.n);
+    good = good & ct_eq(pq, nw);
+    var dn = zero_limbs(nl);
+    put_limbs(dn, d);
+    good = good & ct_lt(dn, pub.n);
+    if good == 0 { return k, false; }
+
+    // p and q are odd: p - 1 and q - 1 clear the low bit.
+    var p1 = zero_limbs(pl);
+    put_limbs(p1, pn);
+    p1[0] = p1[0] & 0xfffffffe;
+    var q1 = zero_limbs(ql);
+    put_limbs(q1, qn);
+    q1[0] = q1[0] & 0xfffffffe;
+    var dp = zero_limbs(pl);
+    ct_reduce(dp, dn, p1);
+    var dq = zero_limbs(ql);
+    ct_reduce(dq, dn, q1);
+
+    let p0i = mont_m0i(pn[0]);
+    var r2p = zero_limbs(pl);
+    mont_r2(r2p, pn);
+    var qp = zero_limbs(pl);
+    ct_reduce(qp, qn, pn);
+    var p2 = zero_limbs(pl);
+    var two = zero_limbs(pl);
+    two[0] = 2;
+    ct_sub(p2, pn, two);                         // p >= 3: no borrow
+    var qinv = zero_limbs(pl);
+    mont_modexp(qinv, qp, p2, pn, p0i, r2p);
+
+    var t = zero_limbs(pl + 2);
+    var x = zero_limbs(pl);
+    var y = zero_limbs(pl);
+    mont_mul(x, qinv, qp, pn, p0i, t);           // qinv q / R
+    mont_mul(y, x, r2p, pn, p0i, t);             // qinv q
+    good = ct_is_one(y) & ct_inverse_check(pub.e, dp, p1) & ct_inverse_check(pub.e, dq, q1);
+    if good == 0 { return k, false; }
+
+    for v in pub.n { k.n.push(v); }
+    for v in pub.e { k.e.push(v); }
+    for v in dn { k.d.push(v); }
+    for v in pn { k.p.push(v); }
+    for v in qn { k.q.push(v); }
+    for v in dp { k.dp.push(v); }
+    for v in dq { k.dq.push(v); }
+    for v in qinv { k.qinv.push(v); }
+    return k, true;
 }
 
 // The odd primes below 2000, for trial division.
@@ -128,8 +220,9 @@ fn small_primes() -> u32[>..] {
     return out;
 }
 
-// A uniform random integer in [0, 2^bits).
-fn random_bits(bits: i64) -> BigInt {
+// A uniform random integer in [0, 2^bits), and in [lo, hi) for lo < hi.
+// Variable time: for public values (DSA's domain parameters).
+fn random_bits_vartime(bits: i64) -> BigInt {
     var b: u8[>..] = [];
     b.resize((bits + 7) / 8, 0);
     random_bytes(b);
@@ -138,18 +231,35 @@ fn random_bits(bits: i64) -> BigInt {
     return from_bytes_be(b);
 }
 
-// A uniform random integer in [lo, hi), for lo < hi.
-fn random_range(lo, hi) -> BigInt {
+fn random_range_vartime(lo, hi) -> BigInt {
     let span = sub(hi, lo);
     let bits = bit_len(span);
     loop {
-        let r = random_bits(bits);
+        let r = random_bits_vartime(bits);
         if lt(r, span) { return add(r, lo); }
     }
 }
 
-// Miller-Rabin with `rounds` random bases, for odd p > 3.
-fn miller_rabin(p, rounds: i64) -> bool {
+// r = a uniform random number in [1, m), at m's width (m > 1 with no zero
+// top limb), in constant time: random bits up to m's length, drawn again
+// until they fall in range. Only the rejected draws are branched on, and
+// they are thrown away.
+fn random_below(r: u32[:], m: const u32[:]) {
+    assert(r.len == m.len && m[m.len - 1] != 0);
+    let top = mag_bit_len(m) - 32 * (m.len - 1);  // m's length is public
+    var b: u8[>..] = [];
+    b.resize(4 * m.len, 0);
+    loop {
+        random_bytes(b);
+        limbs_from_be(r, b);
+        if top < 32 { r[m.len - 1] = r[m.len - 1] & ((1 << top) - 1) as! u32; }
+        if (ct_lt(r, m) & (ct_is_zero(r) ^ 1)) == 1 { return; }
+    }
+}
+
+// Miller-Rabin with `rounds` random bases, for odd p > 3. Variable time
+// (s and d come from BigInt): for public candidates, as DSA's p and q.
+fn miller_rabin_vartime(p, rounds: i64) -> bool {
     let n = p.mag.len;
     let m = p.mag;
     let m0i = mont_m0i(m[0]);
@@ -168,7 +278,7 @@ fn miller_rabin(p, rounds: i64) -> bool {
     var t = zero_limbs(n + 2);
     var tmp = zero_limbs(n);
     for round in rounds {
-        let base = random_range(big(2), p1);
+        let base = random_range_vartime(big(2), p1);
         for i in n { a[i] = if i < base.mag.len { base.mag[i] } else { 0 }; }
         mont_modexp(x, a, dexp.mag, m, m0i, r2);
         if ct_eq(x, one_l) == 1 || ct_eq(x, minus1) == 1 { continue; }
@@ -183,45 +293,123 @@ fn miller_rabin(p, rounds: i64) -> bool {
     return true;
 }
 
-// A random prime of exactly `bits` bits with its top two bits set (so a
-// product of two has twice the bits) and gcd(p - 1, e) == 1.
-fn rsa_random_prime(bits: i64, e, primes: const u32[:]) -> BigInt {
+// Miller-Rabin with `rounds` random bases for p = 3 mod 4 (p > 3), in
+// constant time. Such a p has p - 1 = 2 d with d odd, so a base passes
+// when a^d is 1 or -1, and every round is one exponentiation of p's
+// length. Only a composite's failed round is branched on.
+fn rsa_miller_rabin(p: const u32[:], rounds: i64) -> bool {
+    let n = p.len;
+    let m0i = mont_m0i(p[0]);
+    var r2 = zero_limbs(n);
+    mont_r2(r2, p);
+    var minus1 = zero_limbs(n);                  // p - 1: p is odd
+    put_limbs(minus1, p);
+    minus1[0] = minus1[0] & 0xfffffffe;
+    var dexp = zero_limbs(n);                    // (p - 1) / 2
+    put_limbs(dexp, minus1);
+    ct_shr1(dexp);
+    var a = zero_limbs(n);
+    var x = zero_limbs(n);
+    for round in rounds {
+        loop {                                   // a in [2, p - 2]
+            random_below(a, minus1);
+            if ct_is_one(a) == 0 { break; }
+        }
+        mont_modexp(x, a, dexp, p, m0i, r2);
+        if (ct_is_one(x) | ct_eq(x, minus1)) == 0 { return false; }
+    }
+    return true;
+}
+
+// A random prime of `limbs` limbs with its top two bits set (so a product
+// of two has twice the bits), p = 3 mod 4, and p - 1 prime to e, found in
+// constant time: trial division without dividing, a gcd test with e by
+// ct_mod_inv, then rsa_miller_rabin. Only a failed candidate is branched
+// on, and it is thrown away.
+fn rsa_random_prime(limbs: i64, e: const u32[:], primes: const u32[:]) -> u32[>..] {
+    let bits = 32 * limbs;
     let rounds = if bits >= 1024 { 5 } else if bits >= 512 { 8 } else { 40 };
+    var b: u8[>..] = [];
+    b.resize(4 * limbs, 0);
+    var p = zero_limbs(limbs);
+    var p1 = zero_limbs(limbs);
+    var t = zero_limbs(1);
+    var inv = zero_limbs(1);
     loop {
-        let p = bit_or(random_bits(bits), add(shl(big(3), bits - 2), one()));
+        random_bytes(b);
+        limbs_from_be(p, b);
+        p[limbs - 1] = p[limbs - 1] | 0xc0000000;
+        p[0] = p[0] | 3;
         var sieved = true;
         for sp in primes {
-            if limbs_mod_small(p.mag, sp) == 0 { sieved = false; break; }
+            if ct_mod_small(p, sp) == 0 { sieved = false; break; }
         }
         if !sieved { continue; }
-        if !eq(gcd(sub(p, one()), e), one()) { continue; }
-        if miller_rabin(p, rounds) { return p; }
+        put_limbs(p1, p);
+        p1[0] = p1[0] & 0xfffffffe;
+        ct_reduce(t, p1, e);
+        if ct_mod_inv(inv, t, e) == 0 { continue; }   // gcd(p - 1, e) != 1
+        if rsa_miller_rabin(p, rounds) { return p; }
     }
 }
 
+// d = 1/e mod phi for phi = (p - 1)(q - 1) and a public odd e prime to
+// it, in constant time: with k = -1/phi mod e, 1 + k phi is a multiple of
+// e, and its exact quotient by e is d. This is the RSA paper's d, as Go's
+// crypto/rsa had it before its FIPS module; FIPS 186-5 asks for 1/e mod
+// lcm(p - 1, q - 1), a gcd of two secret even numbers away.
+fn rsa_private_exponent(d: u32[:], phi: const u32[:], e: u32) {
+    var em = zero_limbs(1);
+    em[0] = e;
+    var t = zero_limbs(1);
+    ct_reduce(t, phi, em);
+    var ti = zero_limbs(1);
+    let ok = ct_mod_inv(ti, t, em);
+    assert(ok == 1);                             // p - 1 and q - 1 are prime to e
+    let k: u64 = e - ti[0];                      // -1/phi mod e, in [1, e - 1]
+    var x = zero_limbs(phi.len + 1);
+    var carry: u64 = 1;                          // 1 + k phi
+    for i in phi.len {
+        let v: u64 = phi[i];
+        let s = v * k + carry;
+        x[i] = s as! u32;
+        carry = s >> 32;
+    }
+    x[phi.len] = carry as! u32;
+    var qd = zero_limbs(phi.len + 1);
+    ct_div_exact(qd, x, e);
+    for i in d.len { d[i] = qd[i]; }             // d < phi: the top limb is 0
+}
+
 // A new key of `bits` bits (a multiple of 64, 1024 to 4096) with public
-// exponent e (65537 unless given), from the OS's entropy.
+// exponent e (odd, 3 to 2^32 - 1; 65537 unless given), from the OS's
+// entropy, in constant time.
 fn rsa_generate(bits: i64, e: u64 = 65537) -> RsaPrivateKey {
     assert(bits % 64 == 0 && bits >= 1024 && bits <= 4096);
-    assert(e >= 3 && e % 2 == 1);
-    let eb = from_u64(e);
+    assert(e >= 3 && e % 2 == 1 && e < 4294967296);
+    let half = bits / 64;
+    var el = zero_limbs(1);
+    el[0] = e as! u32;
     let primes = small_primes();
+    var n = zero_limbs(2 * half);
+    var phi = zero_limbs(2 * half);
+    var d = zero_limbs(2 * half);
+    var p1 = zero_limbs(half);
+    var q1 = zero_limbs(half);
     loop {
-        let p = rsa_random_prime(bits / 2, eb, primes);
-        let q = rsa_random_prime(bits / 2, eb, primes);
-        if eq(p, q) { continue; }
-        let n = mul(p, q);
-        let lambda = lcm(sub(p, one()), sub(q, one()));
-        let d, ok = modinv(eb, lambda);
-        if !ok { continue; }
-        // p > q is the usual order, so qinv = q^-1 mod p.
-        if gt(p, q) {
-            let k, kok = rsa_key_from(n, eb, d, p, q);
-            if kok { return k; }
-        } else {
-            let k, kok = rsa_key_from(n, eb, d, q, p);
-            if kok { return k; }
-        }
+        var p = rsa_random_prime(half, el, primes);
+        var q = rsa_random_prime(half, el, primes);
+        if ct_eq(p, q) == 1 { continue; }
+        ct_cswap(ct_mask(ct_lt(p, q)), p, q);    // p > q, the usual order: qinv = 1/q mod p
+        ct_mul(n, p, q);
+        put_limbs(p1, p);
+        p1[0] = p1[0] & 0xfffffffe;
+        put_limbs(q1, q);
+        q1[0] = q1[0] & 0xfffffffe;
+        ct_mul(phi, p1, q1);
+        rsa_private_exponent(d, phi, el[0]);
+        let k, ok = rsa_key_from_limbs(n, el, d, p, q);
+        if ok { return k; }
     }
 }
 
@@ -246,19 +434,14 @@ fn rsa_private_limbs(key, out: u32[:], c: const u32[:]) {
     var tp = zero_limbs(pl + 2);
 
     // Blinding: cb = c * r^e mod n for a random r, undone with 1/r at the
-    // end. modinv runs in variable time, on r alone.
-    let nb = big_of(n);
-    var r = zero();
-    var rinv = zero();
-    loop {
-        r = random_range(one(), nb);
-        let ri, ok = modinv(r, nb);
-        if ok { rinv = copy(ri); break; }
-    }
+    // end; r and 1/r in constant time. (An r with no inverse shares a
+    // factor with n, and is drawn again.)
     var rl = zero_limbs(nl);
     var rinvl = zero_limbs(nl);
-    for i in r.mag.len { rl[i] = r.mag[i]; }
-    for i in rinv.mag.len { rinvl[i] = rinv.mag[i]; }
+    loop {
+        random_below(rl, n);
+        if ct_mod_inv(rinvl, rl, n) == 1 { break; }
+    }
     var re = zero_limbs(nl);
     mont_modexp(re, rl, key.e[..], n, n0i, r2n);
     var tmp = zero_limbs(nl);

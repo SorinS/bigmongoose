@@ -177,3 +177,46 @@ fn be_from_limbs(out: u8[:], src: const u32[:]) {
         out[i] = if pos / 4 < src.len { (src[pos / 4] >> (8 * (pos % 4))) as! u8 } else { 0 };
     }
 }
+
+// r = a^-1 mod m for odd m > 1 and a < m, returning 1; 0 (and r = 0) when
+// gcd(a, m) != 1. Binary extended Euclid in Moller's constant-time form
+// (GMP's mpn_sec_invert): with x = a, y = m, u = 1, v = 0, every step keeps
+// x = u a and y = v a (mod m) and y odd. An odd x smaller than y swaps
+// with it; an odd x has y taken away; then x halves (and u, mod m). Each
+// step shortens x and y together by a bit or more, so 64 m.len steps take
+// x to 0, leaving y = gcd(a, m) and v = 1/a when it is 1. Every step does
+// the same work whatever the values.
+fn ct_mod_inv(r: u32[:], a: const u32[:], m: const u32[:]) -> u32 {
+    let n = m.len;
+    assert(r.len == n && a.len == n && (m[0] & 1) == 1);
+    var buf: u32[>..] = [];
+    buf.resize(6 * n, 0);
+    let x = buf[..n];
+    let y = buf[n..2 * n];
+    let u = buf[2 * n..3 * n];
+    let v = buf[3 * n..4 * n];
+    let half = buf[4 * n..5 * n];                // (m + 1) / 2
+    let one = buf[5 * n..];
+    for i in n { x[i] = a[i]; y[i] = m[i]; half[i] = m[i]; }
+    u[0] = 1;
+    ct_shr1(half);
+    one[0] = 1;
+    ct_add(half, half, one);                     // m odd: no carry
+    for i in 64 * n {
+        let odd = x[0] & 1;
+        let swap = ct_mask(odd & ct_lt(x, y));
+        ct_cswap(swap, x, y);
+        ct_cswap(swap, u, v);
+        let take = ct_mask(odd);
+        ct_sub_masked(x, y, take);               // x >= y here: no borrow
+        ct_add_masked(u, m, ct_mask(ct_sub_masked(u, v, take)));
+        ct_shr1(x);
+        let uodd = ct_mask(u[0] & 1);
+        ct_shr1(u);
+        ct_add_masked(u, half, uodd);            // u/2 mod m: (u - 1)/2 + (m + 1)/2
+    }
+    let ok = ct_is_one(y);
+    ct_select(r, ct_mask(ok), v, x);             // x is 0 by now
+    return ok;
+}
+

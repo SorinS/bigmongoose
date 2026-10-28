@@ -5,9 +5,11 @@
 // cut to its leftmost N bits, as FIPS 186 and openssl do (Go's crypto/dsa
 // leaves that to the caller).
 //
-// Signing is constant time: g^k mod p and the arithmetic mod q go
-// through bignum.mont. Verification and parameter generation, which see
-// only public values, use BigInt.
+// Everything that touches x or a nonce is constant time: the nonce and a
+// new x are drawn below q without a branch on them, x is checked and the
+// deterministic nonce tested against q likewise, and g^k mod p and the
+// arithmetic mod q go through bignum.mont. Verification and parameter
+// generation, which see only public values, use BigInt.
 
 namespace bignum;
 
@@ -36,20 +38,50 @@ fn dsa_key_from(p: const u8[:], q: const u8[:], g: const u8[:], y: const u8[:], 
     let qb = from_bytes_be(q);
     let gb = from_bytes_be(g);
     let yb = from_bytes_be(y);
-    let xb = from_bytes_be(x);
     let lp = bit_len(pb);
     let nq = bit_len(qb);
     if !is_odd(pb) || !is_odd(qb) || lp > 3072 || lp < 512 || (nq != 160 && nq != 224 && nq != 256) { return k, false; }
     if !gt(gb, one()) || !lt(gb, pb) || is_zero(yb) || !lt(yb, pb) { return k, false; }
-    if x.len > 0 && (is_zero(xb) || !lt(xb, qb)) { return k, false; }
     let pw = (lp + 7) / 8;
     let qw = nq / 8;
     k.p.append(dsa_be(pb, pw));
     k.q.append(dsa_be(qb, qw));
     k.g.append(dsa_be(gb, pw));
     k.y.append(dsa_be(yb, pw));
-    if x.len > 0 { k.x.append(dsa_be(xb, qw)); }
+    // x is secret: checked and padded to q's width in constant time. Its
+    // leading zero bytes (a DER INTEGER's) say only how it was written.
+    if x.len > 0 {
+        var i = 0;
+        while i < x.len && x[i] == 0 { i++; }
+        if x.len - i > qw { return k, false; }
+        k.x.resize(qw, 0);
+        for j in x.len - i { k.x[qw - (x.len - i) + j] = x[i + j]; }
+        if dsa_in_range(k.q, k.x) == 0 { return k, false; }
+    }
     return k, true;
+}
+
+// 1 if 0 < v < q for v as wide as q, in constant time, else 0.
+fn dsa_in_range(q: const u8[:], v: const u8[:]) -> u32 {
+    let n = (q.len + 3) / 4;
+    var ql = zero_limbs(n);
+    limbs_from_be(ql, q);
+    var vl = zero_limbs(n);
+    limbs_from_be(vl, v);
+    return ct_lt(vl, ql) & (ct_is_zero(vl) ^ 1);
+}
+
+// A uniform random number in [1, q - 1], as wide as q, in constant time.
+fn dsa_random_scalar(q: const u8[:]) -> u8[>..] {
+    let n = (q.len + 3) / 4;
+    var ql = zero_limbs(n);
+    limbs_from_be(ql, q);
+    var r = zero_limbs(n);
+    random_below(r, ql);
+    var out: u8[>..] = [];
+    out.resize(q.len, 0);
+    be_from_limbs(out, r);
+    return out;
 }
 
 // The public half of a key.
@@ -70,11 +102,11 @@ fn dsa_generate_parameters(l: i64, n: i64) -> u8[>..], u8[>..], u8[>..] {
     assert(l == 1024 && n == 160 || l == 2048 && (n == 224 || n == 256) || l == 3072 && n == 256);
     let primes = small_primes();
     loop {
-        let q = bit_or(random_bits(n), add(shl(one(), n - 1), one()));
+        let q = bit_or(random_bits_vartime(n), add(shl(one(), n - 1), one()));
         if !dsa_probably_prime(q, primes) { continue; }
         let q2 = shl(q, 1);
         for attempt in 4 * l {
-            let c = bit_or(random_bits(l), add(shl(one(), l - 1), one()));
+            let c = bit_or(random_bits_vartime(l), add(shl(one(), l - 1), one()));
             let p = add(sub(c, rem(c, q2)), one());
             if bit_len(p) < l { continue; }
             if !dsa_probably_prime(p, primes) { continue; }
@@ -91,19 +123,14 @@ fn dsa_generate_parameters(l: i64, n: i64) -> u8[>..], u8[>..], u8[>..] {
 
 fn dsa_probably_prime(v, primes: const u32[:]) -> bool {
     for sp in primes {
-        if limbs_mod_small(v.mag, sp) == 0 { return false; }
+        if ct_mod_small(v.mag, sp) == 0 { return false; }
     }
-    return miller_rabin(v, 64);
+    return miller_rabin_vartime(v, 64);
 }
 
 // A fresh key for the parameters: x uniform in [1, q - 1], y = g^x mod p.
 fn dsa_generate_key(p: const u8[:], q: const u8[:], g: const u8[:]) -> DsaKey, bool {
-    let qb = from_bytes_be(q);
-    let x = random_range(one(), qb);
-    let xw = (bit_len(qb) + 7) / 8;
-    let xs = dsa_be(x, xw);
-    var lp = zero_limbs((p.len + 3) / 4);
-    limbs_from_be(lp, p);
+    let xs = dsa_random_scalar(q);
     let y = dsa_powmod(g, xs, p);
     return dsa_key_from(p, q, g, y, xs);
 }
@@ -202,9 +229,8 @@ fn dsa_sign_with(k: const DsaKey&, z: const u8[:], nonce: const u8[:]) -> u8[>..
 fn dsa_sign(k: const DsaKey&, digest: const u8[:]) -> u8[>..] {
     assert(k.x.len > 0);
     let z = dsa_bits2int(k.q, digest);
-    let q = from_bytes_be(k.q);
     loop {
-        let nonce = dsa_be(random_range(one(), q), k.q.len);
+        let nonce = dsa_random_scalar(k.q);
         let sig, ok = dsa_sign_with(k, z, nonce);
         if ok { return sig; }
     }
@@ -242,8 +268,7 @@ fn dsa_sign_deterministic(k: const DsaKey&, digest: const u8[:], hash_id: i64) -
             t.append(v);
         }
         let nonce = dsa_bits2int(k.q, t);
-        let nb = from_bytes_be(nonce);
-        if !is_zero(nb) && lt(nb, q) {
+        if dsa_in_range(k.q, nonce) == 1 {
             let sig, ok = dsa_sign_with(k, z, nonce);
             if ok { return sig; }
         }

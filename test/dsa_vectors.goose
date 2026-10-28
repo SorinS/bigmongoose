@@ -80,6 +80,16 @@ fn main() {
     check("short", !bignum::dsa_verify(pub, d, sig[..sig.len - 1]));
     let k1, ok1 = bignum::dsa_key_from(key.p, key.q, key.g, key.y, key.q);
     check("x = q", !ok1);
+    let k1z, ok1z = bignum::dsa_key_from(key.p, key.q, key.g, key.y, "\x00\x00");
+    check("x = 0", !ok1z);
+    var xpad: u8[>..] = [0, 0];
+    xpad.append(key.x);
+    let k1p, ok1p = bignum::dsa_key_from(key.p, key.q, key.g, key.y, xpad);
+    check("x with leading zeros", ok1p && k1p.x == key.x);
+    var xlong: u8[>..] = [1];
+    xlong.append(key.x);
+    let k1l, ok1l = bignum::dsa_key_from(key.p, key.q, key.g, key.y, xlong);
+    check("x too long", !ok1l);
     let k2, ok2 = bignum::dsa_key_from(key.p, key.q, "\x01", key.y);
     check("g = 1", !ok2);
     var q192: u8[24] = [0xff; 24];
