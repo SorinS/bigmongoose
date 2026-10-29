@@ -47,8 +47,22 @@ fn chacha20_block(key: const u8[:], counter: u32, nonce: const u8[:]) -> u8[64] 
     return out;
 }
 
+// Whether n bytes of keystream from block `counter` stay below 2^32
+// blocks, so that the 32-bit counter never wraps (as Go's chacha20).
+fn chacha20_fits(counter: u32, n: i64) -> bool {
+    if n < 0 { return false; }
+    let blocks = n / 64 + (if n % 64 != 0 { 1 } else { 0 });
+    return blocks <= 4294967296 - (counter as i64);
+}
+
+// The largest ChaCha20-Poly1305 plaintext, (2^32 - 1) * 64 bytes (RFC
+// 8439 §2.8): block 0 makes the Poly1305 key, the data starts at block 1.
+let CHACHA20_POLY1305_MAX: i64 = 274877906880;
+
 // data ^= the keystream starting at block `counter` (RFC 8439 §2.4).
+// Aborts, before touching data, if the counter would wrap.
 fn chacha20_xor(key: const u8[:], counter: u32, nonce: const u8[:], data: u8[:]) {
+    assert(chacha20_fits(counter, data.len));
     var ctr = counter;
     var off = 0;
     while off < data.len {
@@ -193,16 +207,23 @@ fn aead_mac(otk: const u8[:], aad: const u8[:], ct: const u8[:]) -> u8[16] {
 
 // ChaCha20-Poly1305 (RFC 8439 §2.8): encrypts data in place, returns the
 // tag. 32-byte key, 12-byte nonce that must never repeat under the key.
+// Data longer than CHACHA20_POLY1305_MAX aborts, as in Go.
 fn chacha20_poly1305_encrypt(key: const u8[:], nonce: const u8[:], aad: const u8[:], data: u8[:]) -> u8[16] {
+    assert(data.len <= CHACHA20_POLY1305_MAX);
     let otk = chacha20_block(key, 0, nonce);
     chacha20_xor(key, 1, nonce, data);
     return aead_mac(otk[..32], aad, data);
 }
 
 // Checks the tag in constant time, then decrypts in place; false, with
-// data zeroed, on a mismatch (a tag of another length never matches).
+// data zeroed, on a mismatch (a tag of another length never matches) or
+// for data longer than CHACHA20_POLY1305_MAX.
 fn chacha20_poly1305_decrypt(key: const u8[:], nonce: const u8[:], aad: const u8[:], data: u8[:],
                              tag: const u8[:]) -> bool {
+    if data.len > CHACHA20_POLY1305_MAX {
+        for &x in data { x = 0; }
+        return false;
+    }
     let otk = chacha20_block(key, 0, nonce);
     let want = aead_mac(otk[..32], aad, data);
     if tag.len != 16 || ct_eq_bytes(want, tag) == 0 {
@@ -216,6 +237,7 @@ fn chacha20_poly1305_decrypt(key: const u8[:], nonce: const u8[:], aad: const u8
 // One-shot forms: ciphertext followed by the tag, and back.
 fn chacha20_poly1305_seal(key: const u8[:], nonce: const u8[:], aad: const u8[:],
                           plaintext: const u8[:]) -> u8[>..] {
+    assert(plaintext.len <= CHACHA20_POLY1305_MAX);
     var out: u8[>..] = [];
     out.append(plaintext);
     let tag = chacha20_poly1305_encrypt(key, nonce, aad, out);
@@ -226,7 +248,7 @@ fn chacha20_poly1305_seal(key: const u8[:], nonce: const u8[:], aad: const u8[:]
 fn chacha20_poly1305_open(key: const u8[:], nonce: const u8[:], aad: const u8[:],
                           sealed: const u8[:]) -> u8[>..], bool {
     var out: u8[>..] = [];
-    if sealed.len < 16 { return out, false; }
+    if sealed.len < 16 || sealed.len - 16 > CHACHA20_POLY1305_MAX { return out, false; }
     let n = sealed.len - 16;
     out.append(sealed[..n]);
     let ok = chacha20_poly1305_decrypt(key, nonce, aad, out, sealed[n..]);

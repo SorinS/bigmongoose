@@ -440,7 +440,7 @@ fn rsa_private_exponent(d: u32[:], phi: const u32[:], e: u32) {
 // entropy, in constant time.
 fn rsa_generate(bits: i64, e: u64 = 65537) -> RsaPrivateKey {
     assert(bits % 64 == 0 && bits >= 1024 && bits <= 4096);
-    assert(e >= 3 && e % 2 == 1 && e < 4294967296);
+    assert(e >= 3 && e % 2 == 1 && e < 2147483648);         // as rsa_public_from takes
     let half = bits / 64;
     var el = zero_limbs(1);
     el[0] = e as! u32;

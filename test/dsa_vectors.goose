@@ -86,6 +86,8 @@ fn main() {
     xpad.append(key.x);
     let k1p, ok1p = bignum::dsa_key_from(key.p, key.q, key.g, key.y, xpad);
     check("x with leading zeros", ok1p && k1p.x == key.x);
+    let k1s, ok1s = bignum::dsa_key_from(key.p, key.q, key.g, key.y, "\x05");
+    check("x of one byte", ok1s && k1s.x.len == key.q.len && k1s.x[k1s.x.len - 1] == 5 && k1s.x[0] == 0);
     var xlong: u8[>..] = [1];
     xlong.append(key.x);
     let k1l, ok1l = bignum::dsa_key_from(key.p, key.q, key.g, key.y, xlong);

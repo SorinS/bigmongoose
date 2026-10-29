@@ -99,6 +99,17 @@ fn main() {
     d6.resize(8, 1);
     check("short tag", !bignum::chacha20_poly1305_decrypt(k32, k32[..12], "", d6, k32[..15]) && d6[0] == 0);
     check("long tag", !bignum::chacha20_poly1305_decrypt(k32, k32[..12], "", d6, k32[..17]));
+    // The 32-bit block counter never wraps: from 0xffffffff one block
+    // remains, and it is that block's keystream.
+    check("fits: last block", bignum::chacha20_fits(0xffffffff, 64));
+    check("fits: one byte over", !bignum::chacha20_fits(0xffffffff, 65));
+    check("fits: from 0", bignum::chacha20_fits(0, 274877906944) && !bignum::chacha20_fits(0, 274877906945));
+    check("fits: from 1", bignum::chacha20_fits(1, bignum::CHACHA20_POLY1305_MAX)
+                          && !bignum::chacha20_fits(1, bignum::CHACHA20_POLY1305_MAX + 1));
+    check("fits: empty, negative", bignum::chacha20_fits(0xffffffff, 0) && !bignum::chacha20_fits(0, -1));
+    var last: u8[64] = [0; 64];
+    bignum::chacha20_xor(k32, 0xffffffff, k32[..12], last);
+    check("last block", last == bignum::chacha20_block(k32, 0xffffffff, k32[..12]));
     print("chacha20 vectors: ", checks, " checks, ", failures, " failed");
     assert(failures == 0);
 }

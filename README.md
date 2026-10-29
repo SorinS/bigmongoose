@@ -191,7 +191,7 @@ as Go's do.
 
 | Group | Functions |
 |---|---|
-| Keys | `rsa_generate(bits, e = 65537)` (1024 to 4096, a multiple of 64; e odd, below 2^32), `rsa_key_from(n, e, d, p, q) -> key, bool`, `rsa_key_from_bytes(n, e, d, p, q)` (big-endian, as PKCS #1 holds them), `rsa_public_from(n, e) -> pub, bool` (n 1024 to 4096 bits, e odd, 3 to 2^31 − 1, as in Go), `rsa_public(key)`, `rsa_bits`, `rsa_size` |
+| Keys | `rsa_generate(bits, e = 65537)` (1024 to 4096, a multiple of 64; e odd, 3 to 2^31 − 1), `rsa_key_from(n, e, d, p, q) -> key, bool`, `rsa_key_from_bytes(n, e, d, p, q)` (big-endian, as PKCS #1 holds them), `rsa_public_from(n, e) -> pub, bool` (n 1024 to 4096 bits, e odd, 3 to 2^31 − 1, as in Go), `rsa_public(key)`, `rsa_bits`, `rsa_size` |
 | PKCS #1 v1.5 | `rsa_sign_pkcs1(key, msg, hash = 256) -> sig, bool`, `rsa_verify_pkcs1(pub, msg, sig, hash = 256)` |
 | PSS | `rsa_sign_pss(key, msg, salt_len = -1, hash = 256) -> sig, bool`, `rsa_sign_pss_with_salt(key, msg, salt, hash = 256) -> sig, bool`, `rsa_verify_pss(pub, msg, sig, salt_len = -1, hash = 256)`; a salt_len of -1 means the hash's length |
 | OAEP | `rsa_encrypt_oaep(pub, msg, label = "", hash = 256)`, `rsa_encrypt_oaep_with_seed`, `rsa_decrypt_oaep(key, ct, label = "", hash = 256) -> msg, bool`, `rsa_oaep_max(key, hash = 256)` |
@@ -259,7 +259,8 @@ buffer. `gcm_init` / `gcm_encrypt` / `gcm_decrypt` keep the expanded key
 for many messages. GHASH multiplies with integer multiplies on operands
 spread into 4-bit lanes (as in BearSSL's `ghash_ctmul64`), not with tables.
 Never reuse a nonce under one key. 12 bytes is the standard size; other
-lengths work too.
+lengths work too. A message is at most `GCM_MAX` bytes ((2^32 − 2) · 16,
+SP 800-38D): encrypting more aborts, as Go panics, and opening more fails.
 
 `bignum.modes` has the other modes of Go's crypto/cipher, written once
 over any block cipher with a `cipher_encrypt` overload (AES, DES and
@@ -285,7 +286,11 @@ is broken and, as in Go, indexes its state by secret values.
 `_encrypt` / `_decrypt`, with the same contract as GCM: 32-byte key,
 12-byte nonce, 16-byte tag, nothing released on a bad tag. The pieces are
 public too: `chacha20_block`, `chacha20_xor(key, counter, nonce, data)`,
-and `poly1305` one-shot or streaming. Poly1305 uses five 26-bit limbs
+and `poly1305` one-shot or streaming. A message is at most
+`CHACHA20_POLY1305_MAX` bytes ((2^32 − 1) · 64, RFC 8439): encrypting more
+aborts and opening more fails. `chacha20_xor` aborts, before touching the
+data, if its 32-bit block counter would wrap; `chacha20_fits(counter, n)`
+says whether it would. Poly1305 uses five 26-bit limbs
 (after poly1305-donna-32), and its final reduction is a masked select.
 
 `xchacha20_poly1305_seal` / `_open` (and `_encrypt` / `_decrypt`) take a

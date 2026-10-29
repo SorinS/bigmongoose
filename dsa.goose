@@ -48,15 +48,17 @@ fn dsa_key_from(p: const u8[:], q: const u8[:], g: const u8[:], y: const u8[:], 
     k.q.append(dsa_be(qb, qw));
     k.g.append(dsa_be(gb, pw));
     k.y.append(dsa_be(yb, pw));
-    // x is secret: checked and padded to q's width in constant time. Its
-    // leading zero bytes (a DER INTEGER's) say only how it was written.
+    // x is secret: checked and padded to q's width in constant time, in
+    // one pass over all of it whatever its value; only its length (public)
+    // decides which bytes land where. Those above q's width must be zero.
     if x.len > 0 {
-        var i = 0;
-        while i < x.len && x[i] == 0 { i++; }
-        if x.len - i > qw { return k, false; }
         k.x.resize(qw, 0);
-        for j in x.len - i { k.x[qw - (x.len - i) + j] = x[i + j]; }
-        if dsa_in_range(k.q, k.x) == 0 { return k, false; }
+        var high: u32 = 0;
+        for i in x.len {
+            let j = i - (x.len - qw);
+            if j >= 0 { k.x[j] = x[i]; } else { high |= x[i]; }
+        }
+        if (ct_is_zero_u32(high) & dsa_in_range(k.q, k.x)) == 0 { k.x.clear(); return k, false; }
     }
     return k, true;
 }
