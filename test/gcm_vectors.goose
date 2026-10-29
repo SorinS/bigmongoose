@@ -80,6 +80,14 @@ fn main() {
     let short: u8[15] = [0; 15];
     let o5, ok5 = bignum::aes_gcm_open(short, short[..12], "", short);
     check("short", !ok5);
+    // A tag of the wrong length fails (and zeroes the data) rather than
+    // aborting.
+    let k16: u8[16] = [0; 16];
+    let g5 = bignum::gcm_init(k16);
+    var d5: u8[>..] = [];
+    d5.resize(8, 1);
+    check("short tag", !bignum::gcm_decrypt(g5, short[..12], "", d5, short[..15]) && d5[0] == 0);
+    check("empty tag", !bignum::gcm_decrypt(g5, short[..12], "", d5, short[..0]));
     print("gcm vectors: ", checks, " checks, ", failures, " failed");
     assert(failures == 0);
 }

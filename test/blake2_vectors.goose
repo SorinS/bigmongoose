@@ -127,14 +127,16 @@ fn main() {
             let salt = unhex(w[2]);
             let msg = unhex(w[3]);
             let sig = unhex(w[4]);
-            check(line, bignum::rsa_sign_pss_with_salt(key, msg, salt, hash) == sig);
+            let sg, oks = bignum::rsa_sign_pss_with_salt(key, msg, salt, hash);
+            check(line, oks && sg == sig);
             check(line, bignum::rsa_verify_pss(key, msg, sig, salt.len, hash));
             let other = if hash == bignum::HASH_BLAKE2B_512 { bignum::HASH_BLAKE2S_256 } else { bignum::HASH_BLAKE2B_512 };
             check(line, !bignum::rsa_verify_pss(key, msg, sig, salt.len, other));
         } else if w[0] == "pkcs1" {
             let msg = unhex(w[2]);
             let sig = unhex(w[3]);
-            check(line, bignum::rsa_sign_pkcs1(key, msg, num(w[1])) == sig);
+            let sg, oks = bignum::rsa_sign_pkcs1(key, msg, num(w[1]));
+            check(line, oks && sg == sig);
             check(line, bignum::rsa_verify_pkcs1(key, msg, sig, num(w[1])));
             check(line, !bignum::rsa_verify_pkcs1(key, msg, sig, bignum::HASH_SHA1));
             check(line, !bignum::rsa_verify_pkcs1(key, msg, sig, bignum::HASH_BLAKE2B_512));

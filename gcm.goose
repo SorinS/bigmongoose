@@ -164,13 +164,14 @@ fn gcm_encrypt(g: const AesGcm&, nonce: const u8[:], aad: const u8[:], data: u8[
 }
 
 // Checks the tag, then decrypts data in place; returns false, with data
-// zeroed, when the tag does not match. The comparison is constant time.
+// zeroed, when the tag does not match (a tag of another length never
+// does). The comparison is constant time.
 fn gcm_decrypt(g: const AesGcm&, nonce: const u8[:], aad: const u8[:], data: u8[:],
                tag: const u8[:]) -> bool {
-    assert(nonce.len > 0 && tag.len == 16);
+    assert(nonce.len > 0);
     let j0 = gcm_j0(g, nonce);
     let want = gcm_tag(g, j0, aad, data);
-    if ct_eq_bytes(want, tag) == 0 {
+    if tag.len != 16 || ct_eq_bytes(want, tag) == 0 {
         for &x in data { x = 0; }
         return false;
     }

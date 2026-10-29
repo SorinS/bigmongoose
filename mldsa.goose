@@ -363,7 +363,9 @@ fn mldsa_rej_bounded(f: u32[:], rhop: const u8[:], index: i64, eta: i64) {
             let halves: u32[2] = [z & 15, z >> 4];
             for b in halves {
                 if n < 256 {
-                    if eta == 2 && b < 15 { f[n] = mldsa_csub(MLDSA_Q + 2 - b % 5); n++; }
+                    // b mod 5 for b < 15 as a multiply and shift, not a
+                    // division (which may take a time that depends on b).
+                    if eta == 2 && b < 15 { f[n] = mldsa_csub(MLDSA_Q + 2 - (b - 5 * ((b * 205) >> 10))); n++; }
                     else if eta == 4 && b < 9 { f[n] = mldsa_csub(MLDSA_Q + eta_u - b); n++; }
                 }
             }
@@ -580,9 +582,13 @@ fn mldsa_sign_internal(set: i64, seed: const u8[:], mu: const u8[:], rnd: const 
         var count = 0;
         for i in h.len {
             let v = mldsa_sub(w[i], cs2[i]);
-            let moved = mldsa_high_bits(mldsa_add(v, ct0[i]), p.gamma2) != mldsa_high_bits(v, p.gamma2);
-            h[i] = moved;
-            if moved { count++; }
+            // Counted without a branch: the hints of a rejected attempt
+            // stay secret.
+            let a = mldsa_high_bits(mldsa_add(v, ct0[i]), p.gamma2);
+            let b = mldsa_high_bits(v, p.gamma2);
+            let moved = ct_eq_u32(a as! u32, b as! u32) ^ 1;
+            h[i] = moved == 1;
+            count += moved;
         }
         if count > p.omega { continue; }
         var sig: u8[>..] = [];

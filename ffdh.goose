@@ -68,8 +68,11 @@ fn ffdh_value_ok(v: const u8[:], p: const u8[:]) -> bool {
 }
 
 // A secret exponent of xlen random bytes (top bit set, so its length is
-// fixed) and the public value 2^x mod p.
+// fixed) and the public value 2^x mod p. xlen is at least 28 bytes (224
+// bits, twice the 112-bit strength of a 2048-bit group: NIST SP 800-56A,
+// RFC 7919 §5.2) and at most p's length.
 fn ffdh_keygen(p: const u8[:], xlen: i64) -> u8[>..], u8[>..] {
+    assert(xlen >= 28 && xlen <= p.len);
     var x: u8[>..] = [];
     x.resize(xlen, 0);
     random_bytes(x);

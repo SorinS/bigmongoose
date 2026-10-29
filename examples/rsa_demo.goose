@@ -29,10 +29,10 @@ fn main() {
     print("n = ", hex(bignum::to_bytes_be(bignum::big_of(pub.n), bignum::rsa_size(pub)))[..32], "...");
 
     let msg = "the quick brown fox";
-    let sig = bignum::rsa_sign_pss(key, msg);
+    let sig, ok_sig = bignum::rsa_sign_pss(key, msg);
     print("PSS signature verifies: ", bignum::rsa_verify_pss(pub, msg, sig),
           ", on another message: ", bignum::rsa_verify_pss(pub, "the quick brown cat", sig));
-    let sig1 = bignum::rsa_sign_pkcs1(key, msg);
+    let sig1, ok_sig1 = bignum::rsa_sign_pkcs1(key, msg);
     print("PKCS #1 v1.5 signature verifies: ", bignum::rsa_verify_pkcs1(pub, msg, sig1));
 
     let ct = bignum::rsa_encrypt_oaep(pub, "attack at dawn");
@@ -41,7 +41,7 @@ fn main() {
 
     let reps = 20;
     t0 = clock();
-    for i in reps { let s = bignum::rsa_sign_pss(key, msg); }
+    for i in reps { let s, ok_s = bignum::rsa_sign_pss(key, msg); }
     let ts = (clock() - t0) / reps;
     t0 = clock();
     for i in reps { let v = bignum::rsa_verify_pss(pub, msg, sig); }

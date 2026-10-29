@@ -161,10 +161,15 @@ fn main() {
         let m = modulus(r, n);
         var a = limbs(n);
         var inv = limbs(n);
+        var scratch = limbs(n);
         var s: i64[>..] = [];
         for i in 3000 * scale {
             let c = (r.rand_u64() & 1) as! u8;
-            if c == 0 { for &v in a { v = 0; } a[0] = 1; } else { random_limbs(r, a); a[n - 1] = a[n - 1] & 0x7fffffff; }
+            // Both classes do the same work before the timed call (drawing
+            // random limbs, then a copy), so what came before can't differ.
+            random_limbs(r, scratch);
+            scratch[n - 1] = scratch[n - 1] & 0x7fffffff;
+            for k in n { a[k] = if c == 0 { if k == 0 { 1 } else { 0 } } else { scratch[k] }; }
             let t0 = clock_ns();
             let ok = bignum::ct_mod_inv(inv, a, m);
             sample(s, c, clock_ns() - t0);
@@ -208,6 +213,27 @@ fn main() {
             sample(s, c, clock_ns() - t0);
         }
         report("rsa_private_op, 1024 bits, one input or random", s, false);
+    }
+
+    // RSA encryption's x^e mod n: one (secret) padded message against
+    // random ones.
+    block {
+        let k = bignum::rsa_size(key);
+        var fixed: u8[>..] = [];
+        fixed.resize(k, 0);
+        random_bytes_into(r, fixed);
+        fixed[0] = 0;
+        var x: u8[>..] = [];
+        x.resize(k, 0);
+        var s: i64[>..] = [];
+        for i in 3000 * scale {
+            let c = (r.rand_u64() & 1) as! u8;
+            if c == 0 { for j in k { x[j] = fixed[j]; } } else { random_bytes_into(r, x); x[0] = 0; }
+            let t0 = clock_ns();
+            let y, ok = bignum::rsa_public_op_ct(key, x);
+            sample(s, c, clock_ns() - t0);
+        }
+        report("rsa_public_op_ct, 1024 bits, one input or random", s, false);
     }
 
     // Loading an RSA key: one key against seven others, 1024 bits each.

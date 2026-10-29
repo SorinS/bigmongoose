@@ -54,24 +54,27 @@ fn main() {
             let bits, okb = parse_int(w[1], 10);
             if w[0] == "pkcs1h" {
                 let sig = unhex(w[3]);
-                check(line, bignum::rsa_sign_pkcs1(key, msg, bits) == sig);
+                let sg, oks = bignum::rsa_sign_pkcs1(key, msg, bits);
+                check(line, oks && sg == sig);
                 check(line, bignum::rsa_verify_pkcs1(pub, msg, sig, bits));
                 // The same signature under another hash does not verify.
                 check("pkcs1 other hash", !bignum::rsa_verify_pkcs1(pub, msg, sig, if bits == 256 { 384 } else { 256 }));
             } else {
                 let salt = unhex(w[3]);
                 let sig = unhex(w[4]);
-                check(line, bignum::rsa_sign_pss_with_salt(key, msg, salt, bits) == sig);
+                let sg, oks = bignum::rsa_sign_pss_with_salt(key, msg, salt, bits);
+                check(line, oks && sg == sig);
                 check(line, bignum::rsa_verify_pss(pub, msg, sig, salt.len, bits));
                 check("pss other hash", !bignum::rsa_verify_pss(pub, msg, sig, salt.len, if bits == 512 { 384 } else { 512 }));
-                let fresh = bignum::rsa_sign_pss(key, msg, -1, bits);
+                let fresh, ok_fresh = bignum::rsa_sign_pss(key, msg, -1, bits);
                 check("pss default salt", bignum::rsa_verify_pss(pub, msg, fresh, -1, bits));
             }
             continue;
         }
         if w[0] == "pkcs1" {
             let sig = unhex(w[3]);
-            check(line, bignum::rsa_sign_pkcs1(key, msg) == sig);
+            let sg, oks = bignum::rsa_sign_pkcs1(key, msg);
+            check(line, oks && sg == sig);
             check(line, bignum::rsa_verify_pkcs1(pub, msg, sig));
             var other = copy(msg);
             other.push(1);
@@ -83,7 +86,8 @@ fn main() {
         } else if w[0] == "pss" {
             let salt = unhex(w[3]);
             let sig = unhex(w[4]);
-            check(line, bignum::rsa_sign_pss_with_salt(key, msg, salt) == sig);
+            let sg, oks = bignum::rsa_sign_pss_with_salt(key, msg, salt);
+            check(line, oks && sg == sig);
             check(line, bignum::rsa_verify_pss(pub, msg, sig, salt.len));
             check("pss wrong salt length", !bignum::rsa_verify_pss(pub, msg, sig, salt.len + 1));
             var other = copy(msg);
@@ -93,7 +97,7 @@ fn main() {
             bad[bad.len - 1] ^= 1;
             check("pss changed signature", !bignum::rsa_verify_pss(pub, msg, bad, salt.len));
             // A fresh random salt verifies too.
-            let fresh = bignum::rsa_sign_pss(key, msg, salt.len);
+            let fresh, ok_fresh = bignum::rsa_sign_pss(key, msg, salt.len);
             check("pss random salt", bignum::rsa_verify_pss(pub, msg, fresh, salt.len));
         } else if w[0] == "oaep" {
             let label = unhex(w[3]);

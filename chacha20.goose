@@ -200,13 +200,12 @@ fn chacha20_poly1305_encrypt(key: const u8[:], nonce: const u8[:], aad: const u8
 }
 
 // Checks the tag in constant time, then decrypts in place; false, with
-// data zeroed, on a mismatch.
+// data zeroed, on a mismatch (a tag of another length never matches).
 fn chacha20_poly1305_decrypt(key: const u8[:], nonce: const u8[:], aad: const u8[:], data: u8[:],
                              tag: const u8[:]) -> bool {
-    assert(tag.len == 16);
     let otk = chacha20_block(key, 0, nonce);
     let want = aead_mac(otk[..32], aad, data);
-    if ct_eq_bytes(want, tag) == 0 {
+    if tag.len != 16 || ct_eq_bytes(want, tag) == 0 {
         for &x in data { x = 0; }
         return false;
     }

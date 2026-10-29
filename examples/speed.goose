@@ -163,8 +163,8 @@ fn rsa() {
         if !wanted(nm) { continue; }
         let key = bignum::rsa_generate(bits);
         let pub = bignum::rsa_public(key);
-        let sig = bignum::rsa_sign_pkcs1(key, msg);
-        var t = timer(); while more(t) { let s = bignum::rsa_sign_pkcs1(key, msg); }
+        let sig, ok_sig = bignum::rsa_sign_pkcs1(key, msg);
+        var t = timer(); while more(t) { let s, ok_s = bignum::rsa_sign_pkcs1(key, msg); }
         var a: u8[>..] = []; a.append(nm); a.append("-sign"); ops(a, t);
         t = timer(); while more(t) { assert(bignum::rsa_verify_pkcs1(pub, msg, sig)); }
         a = []; a.append(nm); a.append("-verify"); ops(a, t);

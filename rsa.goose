@@ -7,15 +7,19 @@
 // - the private-key operation: CRT with Montgomery exponentiation, the
 //   reductions done bit by bit, the input blinded by a random r^e (r and
 //   1/r in constant time too), and the result checked against the public
-//   key before it is released (a fault in one CRT half would otherwise
-//   give the key away);
+//   key: a fault in one CRT half would give the key away with the result,
+//   so a result that fails the check is never released, and the operation
+//   fails instead (a signature returns false; a decryption folds it into
+//   its other checks, so it fails the way a bad ciphertext does);
 // - loading a key (rsa_key_from, rsa_key_from_bytes): dp, dq and qinv
 //   derived and every check made without a branch on the numbers;
 // - generating one: candidates p = 3 mod 4, trial division without a
 //   division, Miller-Rabin on Montgomery exponentiation, and d = 1/e mod
 //   (p - 1)(q - 1) by way of the public e. Only candidates that fail are
 //   branched on, and they are thrown away.
-// Public-key operations use BigInt, as nothing in them is secret.
+// - encrypting (OAEP and PKCS #1 v1.5): the padded message is secret, so
+//   m^e mod n is a Montgomery exponentiation too (rsa_public_op_ct).
+// Verifying a signature uses BigInt, as nothing in it is secret.
 
 namespace bignum;
 
@@ -67,13 +71,14 @@ fn rsa_public(key) -> RsaPublicKey {
     return r;
 }
 
-// A public key from its numbers; false unless n is odd, 512 to 4096 bits,
-// and 1 < e < n is odd.
+// A public key from its numbers; false unless n is odd and 1024 to 4096
+// bits, and e is odd, 3 <= e < 2^31 (as Go's crypto/rsa: smaller keys are
+// broken, and a larger e only makes verifying slow).
 fn rsa_public_from(n, e) -> RsaPublicKey, bool {
     var r = RsaPublicKey { n: [], e: [] };
     let bits = bit_len(n);
-    if n.neg || e.neg || bits < 512 || bits > 4096 || !is_odd(n) || !is_odd(e)
-        || cmp_i64(e, 1) <= 0 || ge(e, n) {
+    if n.neg || e.neg || bits < 1024 || bits > 4096 || !is_odd(n) || !is_odd(e)
+        || cmp_i64(e, 1) <= 0 || bit_len(e) > 31 {
         return r, false;
     }
     set_limbs(r.n, n, n.mag.len);
@@ -101,22 +106,42 @@ fn rsa_key_from_bytes(n: const u8[:], e: const u8[:], d: const u8[:], p: const u
     return rsa_key_from_limbs(nl, el, dl, pl, ql);
 }
 
-// Big-endian bytes as limbs, as many as they need once leading zero bytes
-// (a DER INTEGER's sign byte) are left out.
+// Big-endian bytes as limbs, every byte read: leading zero bytes (a DER
+// INTEGER's sign byte) give zero top limbs.
 fn be_limbs(b: const u8[:]) -> u32[>..] {
-    var i = 0;
-    while i < b.len && b[i] == 0 { i++; }
-    var r = zero_limbs((b.len - i + 3) / 4);
-    limbs_from_be(r, b[i..]);
+    var r = zero_limbs((b.len + 3) / 4);
+    limbs_from_be(r, b);
     return r;
 }
 
-// The number of limbs below the zero top ones. For lengths only: a key's
-// numbers are as long as its size says, which is public.
+// The number of limbs below the zero top ones, every limb read. For the
+// widths of p and q: the result is public, as in Go (each is half the
+// key's size), but not the values that give it.
 fn limb_len(xs: const u32[:]) -> i64 {
-    var k = xs.len;
-    while k > 0 && xs[k - 1] == 0 { k--; }
-    return k;
+    var k: u32 = 0;
+    for i in xs.len { k = ct_select_u32(ct_mask(ct_is_zero_u32(xs[i]) ^ 1), (i + 1) as! u32, k); }
+    let r: i64 = k;
+    return r;
+}
+
+// The bit length of xs, every limb read, without BigInt: the result is
+// branched on (as Go does for |p - q| and d), but not the limbs.
+fn ct_bit_len(xs: const u32[:]) -> i64 {
+    var bits: u32 = 0;
+    for i in xs.len {
+        let x = xs[i];
+        let b = (32 * i + 64 - ::clz(x | 1)) as! u32;    // x | 1: the same length, and never 0
+        bits = ct_select_u32(ct_mask(ct_is_zero_u32(x) ^ 1), b, bits);
+    }
+    let r: i64 = bits;
+    return r;
+}
+
+// 1 if every limb of xs from the from-th on is zero, else 0.
+fn ct_zero_above(xs: const u32[:], from: i64) -> u32 {
+    var acc: u32 = 0;
+    for i in from..xs.len { acc = acc | xs[i]; }
+    return ct_is_zero_u32(acc);
 }
 
 // dst = xs, padded with zero limbs or cut to dst's width.
@@ -139,7 +164,11 @@ fn ct_inverse_check(e: const u32[:], x: const u32[:], m: const u32[:]) -> u32 {
 // d < n, e dp = 1 mod p - 1, e dq = 1 mod q - 1, qinv q = 1 mod p) made on
 // every value whatever the earlier ones gave. Only their outcome is
 // branched on, so a valid key takes the one path. The lengths (the key's
-// size) are public, and n and e.
+// size) are public, and n and e. Then Go's last two checks, which reveal
+// only magnitudes, and not adaptively: |p - q| > 2^(nbits/2 - 100) (Fermat
+// factors n when p and q are close) and d > 2^(nbits/2) (Wiener and
+// Boneh-Durfee recover a small d). Last, one private operation is checked
+// against the public key.
 fn rsa_key_from_limbs(n: const u32[:], e: const u32[:], d: const u32[:], p: const u32[:], q: const u32[:])
         -> RsaPrivateKey, bool {
     var k = RsaPrivateKey { n: [], e: [], d: [], p: [], q: [], dp: [], dq: [], qinv: [] };
@@ -147,7 +176,7 @@ fn rsa_key_from_limbs(n: const u32[:], e: const u32[:], d: const u32[:], p: cons
     let nl = pub.n.len;
     let pl = limb_len(p);
     let ql = limb_len(q);
-    if !ok || pl == 0 || ql == 0 || pl > 64 || ql > 64 || pl + ql < nl || limb_len(d) > nl {
+    if !ok || pl == 0 || ql == 0 || pl > 64 || ql > 64 || pl + ql < nl {
         return k, false;
     }
     let pn = p[..pl];
@@ -160,8 +189,24 @@ fn rsa_key_from_limbs(n: const u32[:], e: const u32[:], d: const u32[:], p: cons
     good = good & ct_eq(pq, nw);
     var dn = zero_limbs(nl);
     put_limbs(dn, d);
-    good = good & ct_lt(dn, pub.n);
+    good = good & ct_zero_above(d, nl) & ct_lt(dn, pub.n);
     if good == 0 { return k, false; }
+
+    let nbits = mag_bit_len(pub.n);
+    let w = if pl > ql { pl } else { ql };
+    var pw = zero_limbs(w);
+    var qw = zero_limbs(w);
+    put_limbs(pw, pn);
+    put_limbs(qw, qn);
+    var pmq = zero_limbs(w);
+    var qmp = zero_limbs(w);
+    let borrow = ct_sub(pmq, pw, qw);
+    ct_sub(qmp, qw, pw);
+    var pqdiff = zero_limbs(w);
+    ct_select(pqdiff, ct_mask(borrow), qmp, pmq);
+    if ct_bit_len(pqdiff) <= nbits / 2 - 100 || ct_bit_len(dn) <= nbits / 2 {
+        return k, false;
+    }
 
     // p and q are odd: p - 1 and q - 1 clear the low bit.
     var p1 = zero_limbs(pl);
@@ -203,6 +248,15 @@ fn rsa_key_from_limbs(n: const u32[:], e: const u32[:], d: const u32[:], p: cons
     for v in dp { k.dp.push(v); }
     for v in dq { k.dq.push(v); }
     for v in qinv { k.qinv.push(v); }
+
+    // A pairwise consistency test: numbers that pass every check above
+    // with a q (or p) that is not prime give a CRT that is wrong, which
+    // every private operation's check would then catch and fail on. One
+    // operation here refuses such a key instead.
+    var c = zero_limbs(nl);
+    c[0] = 2;
+    var m = zero_limbs(nl);
+    if rsa_private_checked(k, m, c) == 0 { return k, false; }
     return k, true;
 }
 
@@ -413,8 +467,9 @@ fn rsa_generate(bits: i64, e: u64 = 65537) -> RsaPrivateKey {
     }
 }
 
-// out = c^d mod n for c < n, both at n's width, in constant time.
-fn rsa_private_limbs(key, out: u32[:], c: const u32[:]) {
+// out = c^d mod n for c < n, both at n's width, in constant time, and 1
+// if out^e == c, else 0 (a fault: out is then not to be released).
+fn rsa_private_checked(key, out: u32[:], c: const u32[:]) -> u32 {
     let nl = key.n.len;
     let pl = key.p.len;
     let ql = key.q.len;
@@ -486,7 +541,7 @@ fn rsa_private_limbs(key, out: u32[:], c: const u32[:]) {
     mont_mul(out, tmp, r2n, n, n0i, tn);
     var check = zero_limbs(nl);
     mont_modexp(check, out, key.e[..], n, n0i, r2n);
-    assert(ct_eq(check, c) == 1);                        // a fault: never release out
+    return ct_eq(check, c);
 }
 
 // The raw RSA functions on k-byte big-endian strings (k = rsa_size): x^e
@@ -502,18 +557,73 @@ fn rsa_public_op(key, x: const u8[:]) -> u8[>..], bool {
     return out, true;
 }
 
-fn rsa_private_op(key: const RsaPrivateKey&, x: const u8[:]) -> u8[>..], bool {
+// x^e mod n in constant time in x, for a secret x (an encryption's padded
+// message): the same checks as rsa_public_op, with only their outcome
+// branched on, then Montgomery square-and-multiply. Only n and e, which
+// are public, are branched on: R^2 mod n comes from BigInt, and the
+// multiplies follow e's bits.
+fn rsa_public_op_ct(key, x: const u8[:]) -> u8[>..], bool {
     var out: u8[>..] = [];
     let nl = key.n.len;
     if x.len != rsa_size(key) { return out, false; }
     var c = zero_limbs(nl);
     limbs_from_be(c, x);
-    if ct_lt(c, key.n[..]) == 0 { return out, false; }  // public: x is the input
+    let n = key.n[..];
+    if ct_lt(c, n) == 0 { return out, false; }
+    let n0i = mont_m0i(n[0]);
+    var r2n = zero_limbs(nl);
+    put_limbs(r2n, mod_floor(shl(one(), 64 * nl), big_of(key.n)).mag);
+    var t = zero_limbs(nl + 2);
+    var xm = zero_limbs(nl);
+    mont_mul(xm, c, r2n, n, n0i, t);                     // x R
+    var acc = zero_limbs(nl);
+    var tmp = zero_limbs(nl);
+    for i in nl { acc[i] = xm[i]; }
+    let e = key.e[..];
+    var b = mag_bit_len(e) - 1;
+    while b > 0 {
+        b--;
+        mont_mul(tmp, acc, acc, n, n0i, t);
+        if (e[b / 32] >> (b % 32)) & 1 == 1 { mont_mul(acc, tmp, xm, n, n0i, t); }
+        else { for i in nl { acc[i] = tmp[i]; } }
+    }
+    var one_l = zero_limbs(nl);
+    one_l[0] = 1;
     var m = zero_limbs(nl);
-    rsa_private_limbs(key, m, c);
+    mont_mul(m, acc, one_l, n, n0i, t);                  // out of Montgomery form
     out.resize(x.len, 0);
     be_from_limbs(out, m);
     return out, true;
+}
+
+// x^d mod n and true, or empty and false: for x not k bytes or not below
+// n, or when the result fails its check against the public key (a fault).
+fn rsa_private_op(key: const RsaPrivateKey&, x: const u8[:]) -> u8[>..], bool {
+    var out, ok, good = rsa_private_raw(key, x);
+    if !ok || good == 0 {
+        for i in out.len { out[i] = 0; }
+        var none: u8[>..] = [];
+        return none, false;
+    }
+    return out, true;
+}
+
+// The same for decryption: false only for an x that is not k bytes or not
+// below n (public, as x is the input); whether the result passed its check
+// comes back as 1 or 0, for the caller to fold into its constant-time
+// checks on the result.
+fn rsa_private_raw(key: const RsaPrivateKey&, x: const u8[:]) -> u8[>..], bool, u32 {
+    var out: u8[>..] = [];
+    let nl = key.n.len;
+    if x.len != rsa_size(key) { return out, false, 0; }
+    var c = zero_limbs(nl);
+    limbs_from_be(c, x);
+    if ct_lt(c, key.n[..]) == 0 { return out, false, 0; }
+    var m = zero_limbs(nl);
+    let good = rsa_private_checked(key, m, c);
+    out.resize(x.len, 0);
+    be_from_limbs(out, m);
+    return out, true, good;
 }
 
 // Signatures hash with SHA-256, SHA-384 or SHA-512: `hash` is 256, 384
@@ -570,13 +680,16 @@ fn pkcs1_encode(em: u8[:], bits: i64, digest: const u8[:]) {
     for i in digest.len { em[3 + ps + di.len + i] = digest[i]; }
 }
 
-fn rsa_sign_pkcs1(key: const RsaPrivateKey&, msg: const u8[:], hash: i64 = 256) -> u8[>..] {
+// The signature and true, or empty and false: for a hash with no
+// DigestInfo, a key too small for it, or a fault (as Go's SignPKCS1v15
+// returns an error).
+fn rsa_sign_pkcs1(key: const RsaPrivateKey&, msg: const u8[:], hash: i64 = 256) -> u8[>..], bool {
     var em: u8[>..] = [];
+    if !has_digest_info(hash) || rsa_size(key) < digest_info(hash).len + hash_len(hash) + 11 { return em, false; }
     em.resize(rsa_size(key), 0);
     pkcs1_encode(em, hash, hash_bits(hash, msg));
-    let s, ok = rsa_private_op(key, em);
-    assert(ok);
-    return s;
+    let sig, ok = rsa_private_op(key, em);
+    return sig, ok;
 }
 
 // The encoding is rebuilt and compared whole, rather than parsed.
@@ -602,16 +715,18 @@ fn pss_hash(bits: i64, mhash: const u8[:], salt: const u8[:]) -> u8[>..] {
     return hash_bits(bits, m);
 }
 
+// The signature and true, or empty and false: for a key too small for the
+// hash and salt, or a fault (as Go's SignPSS returns an error).
 fn rsa_sign_pss_with_salt(key: const RsaPrivateKey&, msg: const u8[:], salt: const u8[:],
-                          hash: i64 = 256) -> u8[>..] {
+                          hash: i64 = 256) -> u8[>..], bool {
     let hl = hash_len(hash);
     let k = rsa_size(key);
     let embits = rsa_bits(key) - 1;
     let emlen = (embits + 7) / 8;
-    assert(emlen >= hl + salt.len + 2);
+    var em: u8[>..] = [];
+    if emlen < hl + salt.len + 2 { return em, false; }
     let h = pss_hash(hash, hash_bits(hash, msg), salt);
     // em holds EM right-aligned: one leading zero byte when emlen < k.
-    var em: u8[>..] = [];
     em.resize(k, 0);
     let off = k - emlen;
     let dblen = emlen - hl - 1;
@@ -622,12 +737,12 @@ fn rsa_sign_pss_with_salt(key: const RsaPrivateKey&, msg: const u8[:], salt: con
     db[0] = db[0] & (255 >> (8 * emlen - embits)) as! u8;
     for i in hl { em[off + dblen + i] = h[i]; }
     em[k - 1] = 0xbc;
-    let s, ok = rsa_private_op(key, em);
-    assert(ok);
-    return s;
+    let sig, ok = rsa_private_op(key, em);
+    return sig, ok;
 }
 
-fn rsa_sign_pss(key: const RsaPrivateKey&, msg: const u8[:], salt_len: i64 = -1, hash: i64 = 256) -> u8[>..] {
+fn rsa_sign_pss(key: const RsaPrivateKey&, msg: const u8[:], salt_len: i64 = -1, hash: i64 = 256)
+        -> u8[>..], bool {
     var salt: u8[>..] = [];
     salt.resize(if salt_len < 0 { hash_len(hash) } else { salt_len }, 0);
     random_bytes(salt);
@@ -685,7 +800,7 @@ fn rsa_encrypt_oaep_with_seed(key, msg: const u8[:], label: const u8[:], seed: c
     for i in hl { sd[i] = seed[i]; }
     mgf1(hash, db, sd);
     mgf1(hash, sd, db);
-    let c, ok = rsa_public_op(key, em);
+    let c, ok = rsa_public_op_ct(key, em);
     assert(ok);
     return c;
 }
@@ -706,7 +821,7 @@ fn rsa_decrypt_oaep(key: const RsaPrivateKey&, ct: const u8[:], label: const u8[
     let k = rsa_size(key);
     let hl = hash_len(hash);
     if k < 2 * hl + 2 { return out, false; }
-    var em, ok = rsa_private_op(key, ct);
+    var em, ok, checked = rsa_private_raw(key, ct);
     if !ok { return out, false; }
     let dblen = k - hl - 1;
     let sd = em[1..hl + 1];
@@ -714,7 +829,7 @@ fn rsa_decrypt_oaep(key: const RsaPrivateKey&, ct: const u8[:], label: const u8[
     mgf1(hash, sd, db);
     mgf1(hash, db, sd);
     let lhash = hash_bits(hash, label);
-    var good = ct_is_zero_u32(em[0]) & ct_eq_bytes(db[..hl], lhash);
+    var good = checked & ct_is_zero_u32(em[0]) & ct_eq_bytes(db[..hl], lhash);
     // Find the 0x01 after the zero padding, without branching on bytes.
     var found: u32 = 0;
     var bad: u32 = 0;
@@ -753,7 +868,7 @@ fn rsa_encrypt_pkcs1(key, msg: const u8[:]) -> u8[>..] {
         }
     }
     for i in msg.len { em[k - msg.len + i] = msg[i]; }
-    let c, ok = rsa_public_op(key, em);
+    let c, ok = rsa_public_op_ct(key, em);
     assert(ok);
     return c;
 }
@@ -782,28 +897,28 @@ fn pkcs1_decode(em: const u8[:]) -> u32, i64 {
 fn rsa_decrypt_pkcs1(key: const RsaPrivateKey&, ct: const u8[:]) -> u8[>..], bool {
     var out: u8[>..] = [];
     if rsa_size(key) < 11 { return out, false; }
-    let em, ok = rsa_private_op(key, ct);
+    let em, ok, checked = rsa_private_raw(key, ct);
     if !ok { return out, false; }
     let valid, start = pkcs1_decode(em);
-    if valid == 0 { return out, false; }
+    if (valid & checked) == 0 { return out, false; }
     out.append(em[start..]);
     return out, true;
 }
 
 // Go's DecryptPKCS1v15SessionKey: decrypts a key of exactly key_out.len
 // bytes into key_out, which the caller fills with random bytes first. A
-// malformed ciphertext, or one holding a key of another length, leaves
-// key_out as it was, and nothing about which happened takes a different
+// malformed ciphertext, one holding a key of another length, or a fault,
+// leaves key_out as it was, and nothing about which happened takes a different
 // time or path, so the protocol carries on with the random key and fails
 // later, as TLS's RSA key exchange requires. False only when ct is not
 // the size of the modulus, which is public.
 fn rsa_decrypt_pkcs1_session_key(key: const RsaPrivateKey&, ct: const u8[:], key_out: u8[:]) -> bool {
     let k = rsa_size(key);
     if key_out.len > k - 11 { return false; }
-    let em, ok = rsa_private_op(key, ct);
+    let em, ok, checked = rsa_private_raw(key, ct);
     if !ok { return false; }
     let valid, start = pkcs1_decode(em);
-    let use = valid & ct_eq_u32(start as! u32, (k - key_out.len) as! u32);
+    let use = checked & valid & ct_eq_u32(start as! u32, (k - key_out.len) as! u32);
     let mask = ct_mask(use);
     for i in key_out.len {
         let b: u32 = key_out[i];

@@ -92,6 +92,13 @@ fn main() {
             check("nonce", !ok4);
         }
     }
+    // A tag of the wrong length fails (and zeroes the data) rather than
+    // aborting.
+    let k32: u8[32] = [0; 32];
+    var d6: u8[>..] = [];
+    d6.resize(8, 1);
+    check("short tag", !bignum::chacha20_poly1305_decrypt(k32, k32[..12], "", d6, k32[..15]) && d6[0] == 0);
+    check("long tag", !bignum::chacha20_poly1305_decrypt(k32, k32[..12], "", d6, k32[..17]));
     print("chacha20 vectors: ", checks, " checks, ", failures, " failed");
     assert(failures == 0);
 }

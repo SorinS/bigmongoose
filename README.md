@@ -34,7 +34,8 @@ language, written in Goose: a foundation for cryptography.
 - **`bignum.ffdh`**: finite-field Diffie-Hellman over RFC 3526's MODP
   groups 14, 15 and 16 (2048, 3072 and 4096 bits), as SSH uses them: keys,
   the peer value's range check, and the shared secret, the secret exponent
-  raised in constant time.
+  raised in constant time. A secret exponent is at least 224 bits (NIST SP
+  800-56A, RFC 7919 §5.2).
 - **`bignum.aes`**: AES-128/192/256 and CTR mode, bitsliced, constant time.
 - **`bignum.gcm`**: AES-GCM authenticated encryption, constant time.
 - **`bignum.modes`**: CBC, CFB, OFB and CTR over any of the block ciphers,
@@ -94,7 +95,7 @@ import bignum.gcm;
 
 let key = bignum::rsa_generate(2048);
 let pub = bignum::rsa_public(key);
-let sig = bignum::rsa_sign_pss(key, msg);
+let sig, signed = bignum::rsa_sign_pss(key, msg);
 let good = bignum::rsa_verify_pss(pub, msg, sig);
 let ct = bignum::rsa_encrypt_oaep(pub, secret);
 let pt, ok = bignum::rsa_decrypt_oaep(key, ct);
@@ -190,9 +191,9 @@ as Go's do.
 
 | Group | Functions |
 |---|---|
-| Keys | `rsa_generate(bits, e = 65537)` (1024 to 4096, a multiple of 64; e odd, below 2^32), `rsa_key_from(n, e, d, p, q) -> key, bool`, `rsa_key_from_bytes(n, e, d, p, q)` (big-endian, as PKCS #1 holds them), `rsa_public_from(n, e) -> pub, bool`, `rsa_public(key)`, `rsa_bits`, `rsa_size` |
-| PKCS #1 v1.5 | `rsa_sign_pkcs1(key, msg, hash = 256)`, `rsa_verify_pkcs1(pub, msg, sig, hash = 256)` |
-| PSS | `rsa_sign_pss(key, msg, salt_len = -1, hash = 256)`, `rsa_sign_pss_with_salt(key, msg, salt, hash = 256)`, `rsa_verify_pss(pub, msg, sig, salt_len = -1, hash = 256)`; a salt_len of -1 means the hash's length |
+| Keys | `rsa_generate(bits, e = 65537)` (1024 to 4096, a multiple of 64; e odd, below 2^32), `rsa_key_from(n, e, d, p, q) -> key, bool`, `rsa_key_from_bytes(n, e, d, p, q)` (big-endian, as PKCS #1 holds them), `rsa_public_from(n, e) -> pub, bool` (n 1024 to 4096 bits, e odd, 3 to 2^31 − 1, as in Go), `rsa_public(key)`, `rsa_bits`, `rsa_size` |
+| PKCS #1 v1.5 | `rsa_sign_pkcs1(key, msg, hash = 256) -> sig, bool`, `rsa_verify_pkcs1(pub, msg, sig, hash = 256)` |
+| PSS | `rsa_sign_pss(key, msg, salt_len = -1, hash = 256) -> sig, bool`, `rsa_sign_pss_with_salt(key, msg, salt, hash = 256) -> sig, bool`, `rsa_verify_pss(pub, msg, sig, salt_len = -1, hash = 256)`; a salt_len of -1 means the hash's length |
 | OAEP | `rsa_encrypt_oaep(pub, msg, label = "", hash = 256)`, `rsa_encrypt_oaep_with_seed`, `rsa_decrypt_oaep(key, ct, label = "", hash = 256) -> msg, bool`, `rsa_oaep_max(key, hash = 256)` |
 | PKCS #1 v1.5 encryption | `rsa_encrypt_pkcs1(pub, msg)`, `rsa_decrypt_pkcs1(key, ct) -> msg, bool`, `rsa_decrypt_pkcs1_session_key(key, ct, key_out) -> bool` |
 | Raw | `rsa_public_op(pub, x)`, `rsa_private_op(key, x) -> bytes, bool` |
@@ -204,8 +205,15 @@ needs the public half accepts a private key as well. The private operation
 works by CRT. It blinds its input with r^e for a random r (r and 1/r drawn
 and computed in constant time), and checks the result against the public
 exponent before releasing it, so a fault in one CRT half cannot leak a
-prime. Loading a key derives dp, dq and qinv (by Fermat) and makes every
-check without branching on the numbers; only the verdict is branched on.
+prime. A result that fails the check is never released: signing then
+returns false, as Go's returns an error (it also does for a key too small
+for the hash, or a hash with no DigestInfo), and decryption folds the
+check into its constant-time checks on the block, so a fault fails the
+way a bad ciphertext does. Loading a key derives dp, dq and qinv (by
+Fermat) and makes every check without branching on the numbers; only the
+verdict is branched on. It then makes Go's checks that |p − q| >
+2^(nbits/2 − 100) (Fermat's factoring) and d > 2^(nbits/2) (Wiener's and
+Boneh-Durfee's attacks), and one private operation against the public key.
 Key generation draws p = 3 mod 4 (so Miller-Rabin is one exponentiation
 per round), divides by the small primes by multiplying, tests gcd(p − 1, e)
 with `ct_mod_inv`, and takes d = 1/e mod (p − 1)(q − 1) through the public

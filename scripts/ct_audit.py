@@ -22,7 +22,8 @@ ROOT = os.path.normpath(os.path.join(os.path.dirname(__file__), ".."))
 PUBLIC = {
     ("rsa", "rsa_public_from"): "n and e: the public key",
     ("rsa", "rsa_key_from_limbs"): "big_of(n), big_of(e): the public half, checked by rsa_public_from",
-    ("rsa", "rsa_public_op"): "x^e mod n: public key, public input",
+    ("rsa", "rsa_public_op_ct"): "R^2 mod n: the public modulus (x itself goes through mont_mul only)",
+    ("rsa", "rsa_public_op"): "x^e mod n to verify: public key, public signature (encryption: rsa_public_op_ct)",
     ("rsa", "random_bits_vartime"): "for public candidates only (DSA's domain parameters)",
     ("rsa", "random_range_vartime"): "for public candidates only (miller_rabin_vartime's bases)",
     ("rsa", "miller_rabin_vartime"): "for public candidates only (DSA's p and q)",
