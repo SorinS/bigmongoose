@@ -178,22 +178,29 @@ fn main() {
     }
 
     // ct_mod_small, 100 times a run: 0 against random 1024-bit values.
-    // Both classes draw random limbs and copy before the timed call, as
-    // ct_mod_inv's: with a cheap zero fill for one class and 32 draws for
-    // the other, the time differed on x86 (|t| 14 to 25 on an i7-8700)
-    // from what came before the call, not from the call itself.
+    // Every run's input is made before any is timed, as dudect does. Made
+    // between the timed calls, behind a branch on the class, the inputs
+    // left the core in a state that differed by class, and the time
+    // differed with it: |t| 14 to 160 on an i7-8700, varying as the
+    // program's stack layout changed, while the timed code was the same
+    // instructions in every build.
     block {
-        var a = limbs(32);
-        var scratch = limbs(32);
+        let runs = 5000 * scale;
+        var inputs = limbs(32 * runs);
+        var classes: u8[>..] = [];
+        for i in runs {
+            let c = (r.rand_u64() & 1) as! u8;
+            classes.push(c);
+            random_limbs(r, inputs[32 * i..32 * i + 32]);
+            if c == 0 { for k in 32 { inputs[32 * i + k] = 0; } }
+        }
         var s: i64[>..] = [];
         var acc: u32 = 0;
-        for i in 5000 * scale {
-            let c = (r.rand_u64() & 1) as! u8;
-            random_limbs(r, scratch);
-            for k in 32 { a[k] = if c == 0 { 0 } else { scratch[k] }; }
+        for i in runs {
+            let a = inputs[32 * i..32 * i + 32];
             let t0 = clock_ns();
             for k in 100 { acc = acc ^ bignum::ct_mod_small(a, 1999); }
-            sample(s, c, clock_ns() - t0);
+            sample(s, classes[i], clock_ns() - t0);
         }
         report("ct_mod_small, 0 or random", s, false);
         if acc == 12345 { print(""); }           // keep the work
