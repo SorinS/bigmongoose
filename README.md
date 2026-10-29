@@ -191,7 +191,7 @@ as Go's do.
 
 | Group | Functions |
 |---|---|
-| Keys | `rsa_generate(bits, e = 65537)` (1024 to 4096, a multiple of 64; e odd, 3 to 2^31 − 1), `rsa_key_from(n, e, d, p, q) -> key, bool`, `rsa_key_from_bytes(n, e, d, p, q)` (big-endian, as PKCS #1 holds them), `rsa_public_from(n, e) -> pub, bool` (n 1024 to 4096 bits, e odd, 3 to 2^31 − 1, as in Go), `rsa_public(key)`, `rsa_bits`, `rsa_size` |
+| Keys | `rsa_generate(bits, e = 65537)` (1024 to 8192, a multiple of 64; e odd, 3 to 2^31 − 1), `rsa_key_from(n, e, d, p, q) -> key, bool`, `rsa_key_from_bytes(n, e, d, p, q)` (big-endian, as PKCS #1 holds them), `rsa_public_from(n, e) -> pub, bool` (n 1024 to 8192 bits, Go's limit for TLS peers' keys; e odd, 3 to 2^31 − 1, as in Go), `rsa_public(key)`, `rsa_bits`, `rsa_size` |
 | PKCS #1 v1.5 | `rsa_sign_pkcs1(key, msg, hash = 256) -> sig, bool`, `rsa_verify_pkcs1(pub, msg, sig, hash = 256)` |
 | PSS | `rsa_sign_pss(key, msg, salt_len = -1, hash = 256) -> sig, bool`, `rsa_sign_pss_with_salt(key, msg, salt, hash = 256) -> sig, bool`, `rsa_verify_pss(pub, msg, sig, salt_len = -1, hash = 256)`; a salt_len of -1 means the hash's length |
 | OAEP | `rsa_encrypt_oaep(pub, msg, label = "", hash = 256)`, `rsa_encrypt_oaep_with_seed`, `rsa_decrypt_oaep(key, ct, label = "", hash = 256) -> msg, bool`, `rsa_oaep_max(key, hash = 256)` |
@@ -200,7 +200,7 @@ as Go's do.
 
 `hash` is any of bignum.hmac's hash ids (SHA-256 by default), and PSS
 and OAEP run MGF1 on the same hash. A key is fixed-size limb
-arrays (`u32[..128]`, so at most 4096 bits), and every function that only
+arrays (`u32[..256]`, so at most 8192 bits), and every function that only
 needs the public half accepts a private key as well. The private operation
 works by CRT. It blinds its input with r^e for a random r (r and 1/r drawn
 and computed in constant time), and checks the result against the public
@@ -557,6 +557,7 @@ python3 scripts/ct_timing.py [scale]    # timing tests of the constant-time code
 python3 scripts/wycheproof.py [file ...]   # Wycheproof's vectors (../wycheproof.git), about 20 minutes
 python3 scripts/dudect.py [--seconds S]    # dudect's own harness on the constant-time code (x86, ../dudect.git)
 python3 scripts/gen_vectors.py          # regenerate test/vectors from Python's integers
+scripts/gen_rsa8192.sh                  # regenerate test/vectors/rsa8192.txt with openssl
 tools/govectors.sh -check test/vectors/xcrypto.txt   # xcrypto.txt against Go's x/crypto (needs Go)
 tools/govectors.sh > test/vectors/xcrypto.txt   # regenerate it
 ```
@@ -587,7 +588,7 @@ tools/govectors.sh > test/vectors/xcrypto.txt   # regenerate it
   DSA, ML-KEM, ML-DSA and primality. A valid test must give Wycheproof's
   output, an invalid one must be refused. What is not tried is listed with
   its reason: curves and hashes this package does not have, PSS and OAEP
-  with an MGF hash other than the message's, RSA keys above 4096 bits, XTS
+  with an MGF hash other than the message's, RSA keys above 8192 bits, XTS
   ciphertext stealing, ML-DSA signing from an expanded key.
 - `scripts/dudect.py` (x86 only): dudect itself (oreparaz/dudect,
   `src/dudect.h` unchanged) times `tools/dudect/targets.goose`, the
@@ -615,7 +616,10 @@ tools/govectors.sh > test/vectors/xcrypto.txt   # regenerate it
   with each part tampered with in turn.
 - `rsa_vectors`: PKCS #1 v1.5, PSS and OAEP under 1024-, 1025-, 1536-bit
   (e = 3) and 2048-bit keys. Outputs must match byte for byte, and changed
-  inputs must be rejected.
+  inputs must be rejected. Then an 8192-bit key from openssl
+  (`scripts/gen_rsa8192.sh`), the largest taken: openssl's PKCS #1 v1.5
+  signature made again byte for byte, its PSS signature verified, its OAEP
+  ciphertext decrypted, and changed ones refused.
 - `hash_vectors`: SHA-384 and SHA-512 at lengths around the 128-byte block,
   one-shot and in pieces; HMAC with keys shorter and longer than a block;
   HKDF, including RFC 5869's first test case.

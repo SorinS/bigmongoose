@@ -73,6 +73,12 @@ fn main() {
     // Go's bounds on the public key: 1024 bits or more, and 3 <= e < 2^31.
     let p8, okp8 = bignum::rsa_public_from(bignum::sub(bignum::shl(bignum::one(), 1023), bignum::one()), e);
     check("1023 bits", !okp8);
+    // And 8192 bits at most, Go's limit for TLS peers' keys.
+    let n8192 = bignum::sub(bignum::shl(bignum::one(), 8192), bignum::one());
+    let p9, okp9 = bignum::rsa_public_from(n8192, e);
+    let n8193 = bignum::add(bignum::shl(bignum::one(), 8192), bignum::one());
+    let p10, okp10 = bignum::rsa_public_from(n8193, e);
+    check("8192 bits taken, 8193 refused", okp9 && bignum::rsa_bits(p9) == 8192 && !okp10);
     let p9, okp9 = bignum::rsa_public_from(n, bignum::add(bignum::shl(bignum::one(), 31), bignum::one()));
     let p10, okp10 = bignum::rsa_public_from(n, bignum::sub(bignum::shl(bignum::one(), 31), bignum::one()));
     check("e 2^31 + 1", !okp9 && okp10);

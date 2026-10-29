@@ -113,9 +113,9 @@ def convert(name, d):
 def group_rows(name, d, g):
     typ = g["type"]
     alg = d["algorithm"]
-    # bignum takes RSA keys of 1024 to 4096 bits (rsa_public_from).
-    if typ.startswith("Rsa") and g.get("keySize", 0) > 4096:
-        raise Unsupported("RSA keys above 4096 bits")
+    # bignum takes RSA keys of 1024 to 8192 bits (rsa_public_from).
+    if typ.startswith("Rsa") and g.get("keySize", 0) > 8192:
+        raise Unsupported("RSA keys above 8192 bits")
     if typ == "AeadTest":
         kind = {"AES-GCM": "aead_gcm", "CHACHA20-POLY1305": "aead_chacha", "XCHACHA20-POLY1305": "aead_xchacha"}.get(alg)
         if not kind:

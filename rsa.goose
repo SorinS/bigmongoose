@@ -1,6 +1,7 @@
 // bignum.rsa: RSA (RFC 8017): key generation, PKCS #1 v1.5 and PSS
 // signatures and OAEP encryption with SHA-1, SHA-2 or SHA-3 (bignum.hmac's
-// hash ids), and PKCS #1 v1.5 encryption. Keys up to 4096 bits.
+// hash ids), and PKCS #1 v1.5 encryption. Keys up to 8192 bits, Go's
+// limit for TLS peers' keys (crypto/tls defaultMaxRSAKeySize).
 //
 // Everything that touches a private key is constant time, on limbs of the
 // key's width (bignum.ct and bignum.mont), with only the key's size public:
@@ -34,11 +35,11 @@ import entropy;
 // Little-endian limbs, normalized: n, p and q have no zero top limb, and
 // each exponent and qinv is padded to its modulus' width (d to n's, dp and
 // qinv to p's, dq to q's), so lengths say nothing more than the key size.
-struct RsaPublicKey { n: u32[..128], e: u32[..128] }
+struct RsaPublicKey { n: u32[..256], e: u32[..256] }
 
 struct RsaPrivateKey {
-    n: u32[..128], e: u32[..128], d: u32[..128],
-    p: u32[..64], q: u32[..64], dp: u32[..64], dq: u32[..64], qinv: u32[..64],
+    n: u32[..256], e: u32[..256], d: u32[..256],
+    p: u32[..128], q: u32[..128], dp: u32[..128], dq: u32[..128], qinv: u32[..128],
 }
 
 // dst = the limbs of v >= 0, exactly w of them.
@@ -71,13 +72,13 @@ fn rsa_public(key) -> RsaPublicKey {
     return r;
 }
 
-// A public key from its numbers; false unless n is odd and 1024 to 4096
+// A public key from its numbers; false unless n is odd and 1024 to 8192
 // bits, and e is odd, 3 <= e < 2^31 (as Go's crypto/rsa: smaller keys are
 // broken, and a larger e only makes verifying slow).
 fn rsa_public_from(n, e) -> RsaPublicKey, bool {
     var r = RsaPublicKey { n: [], e: [] };
     let bits = bit_len(n);
-    if n.neg || e.neg || bits < 1024 || bits > 4096 || !is_odd(n) || !is_odd(e)
+    if n.neg || e.neg || bits < 1024 || bits > 8192 || !is_odd(n) || !is_odd(e)
         || cmp_i64(e, 1) <= 0 || bit_len(e) > 31 {
         return r, false;
     }
@@ -176,7 +177,7 @@ fn rsa_key_from_limbs(n: const u32[:], e: const u32[:], d: const u32[:], p: cons
     let nl = pub.n.len;
     let pl = limb_len(p);
     let ql = limb_len(q);
-    if !ok || pl == 0 || ql == 0 || pl > 64 || ql > 64 || pl + ql < nl {
+    if !ok || pl == 0 || ql == 0 || pl > k.p.cap || ql > k.q.cap || pl + ql < nl {
         return k, false;
     }
     let pn = p[..pl];
@@ -438,12 +439,12 @@ fn rsa_private_exponent(d: u32[:], phi: const u32[:], e: u32) {
     for i in d.len { d[i] = qd[i]; }             // d < phi: the top limb is 0
 }
 
-// A new key of `bits` bits (a multiple of 64, 1024 to 4096) with public
+// A new key of `bits` bits (a multiple of 64, 1024 to 8192) with public
 // exponent e (odd, 3 to 2^31 - 1, as rsa_public_from takes; 65537
 // unless given), from the OS's
 // entropy, in constant time.
 fn rsa_generate(bits: i64, e: u64 = 65537) -> RsaPrivateKey {
-    assert(bits % 64 == 0 && bits >= 1024 && bits <= 4096);
+    assert(bits % 64 == 0 && bits >= 1024 && bits <= 8192);
     assert(e >= 3 && e % 2 == 1 && e < 2147483648);         // as rsa_public_from takes
     let half = bits / 64;
     var el = zero_limbs(1);

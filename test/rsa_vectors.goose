@@ -5,7 +5,8 @@
 // ciphertexts made by a Python transcription of RFC 8017 and checked
 // against openssl. Signing and encrypting with the same salt or seed must
 // give the same bytes, and verification and decryption must accept them
-// and reject any change.
+// and reject any change. Then the largest key taken, 8192 bits
+// (vectors/rsa8192.txt): openssl's signatures and ciphertext.
 import std;
 import bignum from "..";
 import bignum.rsa;
@@ -35,6 +36,37 @@ fn num(s: const u8[:]) -> bignum::BigInt {
     let v, ok = bignum::parse(s, 16);
     assert(ok);
     return v;
+}
+
+// An 8192-bit key from openssl, as bignum's largest: imported, openssl's
+// PKCS #1 v1.5 signature made again byte for byte, its PSS signature
+// verified, its OAEP ciphertext decrypted; changed ones refused.
+fn field8192(name: const u8[:]) -> u8[>..] {
+    for line in split(embed_file("vectors/rsa8192.txt"), '\n') {
+        let w = words(line);
+        if w.len == 2 && w[0] == name { return unhex(w[1]); }
+    }
+    assert(false);
+    var none: u8[>..] = [];
+    return none;
+}
+
+fn rsa8192() {
+    let key, ok = bignum::rsa_key_from_bytes(field8192("n"), field8192("e"), field8192("d"), field8192("p"), field8192("q"));
+    check("8192: key", ok && bignum::rsa_bits(key) == 8192);
+    let sig, oks = bignum::rsa_sign_pkcs1(key, "a message", 256);
+    check("8192: PKCS #1 v1.5 as openssl", oks && sig == field8192("pkcs1"));
+    check("8192: PKCS #1 v1.5 verifies", bignum::rsa_verify_pkcs1(key, "a message", field8192("pkcs1"), 256));
+    check("8192: PSS verifies", bignum::rsa_verify_pss(key, "a message", field8192("pss"), 32, 256));
+    var bad = field8192("pss");
+    bad[100] ^= 1;
+    check("8192: changed PSS refused", !bignum::rsa_verify_pss(key, "a message", bad, 32, 256));
+    let pt, okd = bignum::rsa_decrypt_oaep(key, field8192("oaep"), "", 256);
+    check("8192: OAEP decrypts", okd && pt == "a message");
+    var badc = field8192("oaep");
+    badc[5] ^= 1;
+    let pt2, okd2 = bignum::rsa_decrypt_oaep(key, badc, "", 256);
+    check("8192: changed OAEP refused", !okd2);
 }
 
 fn main() {
@@ -118,6 +150,7 @@ fn main() {
             check("oaep random seed", ok4 && m4 == msg);
         }
     }
+    rsa8192();
     print("rsa vectors: ", checks, " checks, ", failures, " failed");
     assert(failures == 0);
 }
