@@ -14,6 +14,7 @@ import sha1;
 import sha3;
 import md5;
 import blake2;
+import ct;
 
 let HASH_MD5: i64 = 128;
 let HASH_SHA1: i64 = 160;
@@ -112,6 +113,66 @@ fn hmac(bits: i64, key: const u8[:], msg: const u8[:]) -> u8[>..] {
     let inner = hash2(bits, kpad[..bl], msg);
     for i in bl { kpad[i] = k[i] ^ 0x5c; }
     return hash2(bits, kpad[..bl], inner);
+}
+
+// HMAC-SHA-1 or HMAC-SHA-256 (bits 160 or 256) of prefix ‖ data[..len],
+// in time that does not depend on len, nor on any byte's value: only on
+// key.len, prefix.len, data.len and min_len, all public. For TLS's CBC
+// records, whose MAC'd length comes out of the decrypted padding
+// (Lucky13); the caller keeps min_len <= len <= data.len. As OpenSSL's
+// ssl3_cbc_digest_record: the inner hash's blocks that lie wholly before
+// min_len are hashed as usual; each block the message's end could fall in
+// is built byte by byte with masks (the data, the 0x80, the length in the
+// last), every one is compressed, and the state after the last is kept by
+// a mask. The key is at most 64 bytes.
+fn hmac_prefix_ct(bits: i64, key: const u8[:], prefix: const u8[:], data: const u8[:], len: i64,
+                  min_len: i64) -> u8[>..] {
+    assert((bits == 160 || bits == 256) && key.len <= 64 && min_len >= 0 && min_len <= data.len);
+    var kpad: u8[64] = [0; 64];
+    for i in key.len { kpad[i] = key[i]; }
+    // The inner hash's input: ipad, prefix, data; its message is the first
+    // m bytes, m secret, m_min <= m <= m_max.
+    var st: u8[>..] = [];
+    for i in 64 { st.push(kpad[i] ^ 0x36); }
+    st.append(prefix);
+    st.append(data);
+    let m = 64 + prefix.len + len;
+    let m_min = 64 + prefix.len + min_len;
+    let m_max = st.len;
+    let bitlen = (m as! u64) * 8;
+    let last = ((m + 8) / 64) as! u32;              // the block holding the length
+    var s1 = sha1_init();
+    var s2 = sha256_init();
+    let nw = bits / 32;
+    let k0 = m_min / 64;
+    for j in k0 {
+        if bits == 160 { sha1_block(s1, st[64 * j..64 * j + 64]); } else { sha256_block(s2, st[64 * j..64 * j + 64]); }
+    }
+    var h: u32[8] = [0; 8];
+    var blk: u8[64] = [0; 64];
+    for j in k0..(m_max + 8) / 64 + 1 {
+        let mask_last = ct_mask(ct_eq_u32(j as! u32, last));
+        for i in 64 {
+            let p = 64 * j + i;
+            let b: u32 = if p < st.len { st[p] } else { 0 };
+            var v = (b & ct_mask(ct_lt_u32(p as! u32, m as! u32))) | (0x80 & ct_mask(ct_eq_u32(p as! u32, m as! u32)));
+            if i >= 56 { v = ct_select_u32(mask_last, ((bitlen >> (8 * (63 - i))) as! u32) & 0xff, v); }
+            blk[i] = v as! u8;
+        }
+        if bits == 160 {
+            sha1_block(s1, blk);
+            for w in 5 { h[w] = ct_select_u32(mask_last, s1.h[w], h[w]); }
+        } else {
+            sha256_block(s2, blk);
+            for w in 8 { h[w] = ct_select_u32(mask_last, s2.h[w], h[w]); }
+        }
+    }
+    var inner: u8[>..] = [];
+    for w in nw {
+        for k in 4 { inner.push((h[w] >> (24 - 8 * k)) as! u8); }
+    }
+    for i in 64 { kpad[i] = kpad[i] ^ 0x5c; }
+    return hash2(bits, kpad, inner);
 }
 
 fn hmac_sha256(key: const u8[:], msg: const u8[:]) -> u8[>..] { hmac(256, key, msg) }

@@ -405,7 +405,11 @@ The generic functions name a hash by an id: 128 (MD5), 160 (SHA-1), 224, 256, 38
 `hash_bits(id, data)`, HMAC, HKDF, PBKDF2, MGF1, RSA PSS and OAEP, and
 ECDSA over a digest (`ecdsa_sign_digest`). RSA PKCS #1 v1.5 signatures
 take MD5, SHA-1, SHA-2 and SHA-3 but not BLAKE2, which has no DigestInfo
-(as in Go); verifying with an unsupported hash returns false. `hmac(id, key, msg)` and the `hmac_sha256/384/512` shortcuts cover HMAC.
+(as in Go); verifying with an unsupported hash returns false. `hmac(id, key, msg)` and the `hmac_sha256/384/512` shortcuts cover HMAC. `hmac_prefix_ct(id, key,
+prefix, data, len, min_len)` is HMAC-SHA-1 or -SHA-256 of prefix ‖
+data[..len] in time that depends on neither len nor the bytes, only on the
+public lengths, for TLS's CBC records (Lucky13), as OpenSSL's
+`ssl3_cbc_digest_record`.
 `hkdf_extract`, `hkdf_expand` and `hkdf` cover HKDF. TLS 1.3's HKDF-Expand-Label is a
 few lines on top of `hkdf_expand` and is not included.
 

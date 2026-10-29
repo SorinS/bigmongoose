@@ -37,6 +37,36 @@ fn num(s: const u8[:]) -> i64 {
     return v;
 }
 
+// hmac_prefix_ct equals hmac over prefix ‖ data[..len] for every len in
+// its window, SHA-1 and SHA-256, around the block and padding boundaries.
+fn prefix_ct() {
+    var key: u8[32] = [0; 32];
+    for i in 32 { key[i] = (7 * i + 1) as! u8; }
+    var prefix: u8[13] = [0; 13];
+    for i in 13 { prefix[i] = (i + 0x40) as! u8; }
+    var all = true;
+    var n = 0;
+    for bits in [160, 256] {
+        for size in [0, 1, 47, 55, 56, 64, 100, 119, 120, 300, 1000] {
+            var data: u8[>..] = [];
+            for i in size { data.push((i * 31 + size) as! u8); }
+            let min_len = ::max(0, size - 70);
+            for len in min_len..size + 1 {
+                var whole: u8[>..] = [];
+                whole.append(prefix);
+                whole.append(data[..len]);
+                let kl = if bits == 160 { 20 } else { 32 };
+                if bignum::hmac_prefix_ct(bits, key[..kl], prefix, data, len, min_len) != bignum::hmac(bits, key[..kl], whole) {
+                    all = false;
+                    print("FAIL hmac_prefix_ct ", bits, " size ", size, " len ", len);
+                }
+                n++;
+            }
+        }
+    }
+    check("hmac_prefix_ct", all && n > 900);
+}
+
 fn main() {
     for line in split(embed_file("vectors/hash.txt"), '\n') {
         let w = words(line);
@@ -117,6 +147,7 @@ fn main() {
     }
     check("hmac_sha256", bignum::hmac_sha256("key", "The quick brown fox jumps over the lazy dog")
           == unhex("f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8"));
+    prefix_ct();
     print("hash vectors: ", checks, " checks, ", failures, " failed");
     assert(failures == 0);
 }
