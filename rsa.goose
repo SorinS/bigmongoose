@@ -436,7 +436,8 @@ fn rsa_private_exponent(d: u32[:], phi: const u32[:], e: u32) {
 }
 
 // A new key of `bits` bits (a multiple of 64, 1024 to 4096) with public
-// exponent e (odd, 3 to 2^32 - 1; 65537 unless given), from the OS's
+// exponent e (odd, 3 to 2^31 - 1, as rsa_public_from takes; 65537
+// unless given), from the OS's
 // entropy, in constant time.
 fn rsa_generate(bits: i64, e: u64 = 65537) -> RsaPrivateKey {
     assert(bits % 64 == 0 && bits >= 1024 && bits <= 4096);

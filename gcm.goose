@@ -157,11 +157,15 @@ fn gcm_tag(g: const AesGcm&, j0: const u8[:], aad: const u8[:], ct: const u8[:])
 // the tag, and then repeat.
 let GCM_MAX: i64 = 68719476704;
 
+// Whether a GCM message of n bytes is within GCM_MAX: what every entry
+// point below checks.
+fn gcm_fits(n: i64) -> bool { n >= 0 && n <= GCM_MAX }
+
 // Encrypts data in place and returns the 16-byte tag. A nonce must never
 // repeat under one key; 12 bytes is the standard size. Data longer than
 // GCM_MAX aborts, as in Go.
 fn gcm_encrypt(g: const AesGcm&, nonce: const u8[:], aad: const u8[:], data: u8[:]) -> u8[16] {
-    assert(nonce.len > 0 && data.len <= GCM_MAX);
+    assert(nonce.len > 0 && gcm_fits(data.len));
     let j0 = gcm_j0(g, nonce);
     var cb = j0;
     ctr_increment(cb, true);
@@ -175,7 +179,7 @@ fn gcm_encrypt(g: const AesGcm&, nonce: const u8[:], aad: const u8[:], data: u8[
 fn gcm_decrypt(g: const AesGcm&, nonce: const u8[:], aad: const u8[:], data: u8[:],
                tag: const u8[:]) -> bool {
     assert(nonce.len > 0);
-    if data.len > GCM_MAX {
+    if !gcm_fits(data.len) {
         for &x in data { x = 0; }
         return false;
     }
@@ -194,7 +198,7 @@ fn gcm_decrypt(g: const AesGcm&, nonce: const u8[:], aad: const u8[:], data: u8[
 // One-shot forms: ciphertext followed by the tag, and back.
 fn aes_gcm_seal(key: const u8[:], nonce: const u8[:], aad: const u8[:],
                 plaintext: const u8[:]) -> u8[>..] {
-    assert(plaintext.len <= GCM_MAX);
+    assert(gcm_fits(plaintext.len));
     let g = gcm_init(key);
     var out: u8[>..] = [];
     out.append(plaintext);
@@ -206,7 +210,7 @@ fn aes_gcm_seal(key: const u8[:], nonce: const u8[:], aad: const u8[:],
 fn aes_gcm_open(key: const u8[:], nonce: const u8[:], aad: const u8[:],
                 sealed: const u8[:]) -> u8[>..], bool {
     var out: u8[>..] = [];
-    if sealed.len < 16 || sealed.len - 16 > GCM_MAX { return out, false; }
+    if sealed.len < 16 || !gcm_fits(sealed.len - 16) { return out, false; }
     let g = gcm_init(key);
     let n = sealed.len - 16;
     out.append(sealed[..n]);

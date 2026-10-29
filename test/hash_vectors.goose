@@ -65,6 +65,13 @@ fn prefix_ct() {
         }
     }
     check("hmac_prefix_ct", all && n > 900);
+    // Its public size limit, around 2^30 (the positions it compares are 32
+    // bits): checked without making such a buffer.
+    let lim = bignum::HMAC_PREFIX_CT_MAX;
+    check("hmac_prefix_ct_fits", bignum::hmac_prefix_ct_fits(13, lim - 13) && !bignum::hmac_prefix_ct_fits(13, lim - 12)
+          && bignum::hmac_prefix_ct_fits(0, lim) && !bignum::hmac_prefix_ct_fits(lim + 1, 0)
+          && !bignum::hmac_prefix_ct_fits(-1, 0) && !bignum::hmac_prefix_ct_fits(0, -1)
+          && !bignum::hmac_prefix_ct_fits(lim, lim));
 }
 
 fn main() {

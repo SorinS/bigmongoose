@@ -88,6 +88,9 @@ fn main() {
     d5.resize(8, 1);
     check("short tag", !bignum::gcm_decrypt(g5, short[..12], "", d5, short[..15]) && d5[0] == 0);
     check("empty tag", !bignum::gcm_decrypt(g5, short[..12], "", d5, short[..0]));
+    // The size limit every entry point checks, at its boundary.
+    check("gcm_fits", bignum::gcm_fits(0) && bignum::gcm_fits(bignum::GCM_MAX) && !bignum::gcm_fits(bignum::GCM_MAX + 1)
+          && !bignum::gcm_fits(-1) && bignum::GCM_MAX == (4294967296 - 2) * 16);
     print("gcm vectors: ", checks, " checks, ", failures, " failed");
     assert(failures == 0);
 }

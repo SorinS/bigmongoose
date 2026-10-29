@@ -178,13 +178,19 @@ fn main() {
     }
 
     // ct_mod_small, 100 times a run: 0 against random 1024-bit values.
+    // Both classes draw random limbs and copy before the timed call, as
+    // ct_mod_inv's: with a cheap zero fill for one class and 32 draws for
+    // the other, the time differed on x86 (|t| 14 to 25 on an i7-8700)
+    // from what came before the call, not from the call itself.
     block {
         var a = limbs(32);
+        var scratch = limbs(32);
         var s: i64[>..] = [];
         var acc: u32 = 0;
         for i in 5000 * scale {
             let c = (r.rand_u64() & 1) as! u8;
-            if c == 0 { for &v in a { v = 0; } } else { random_limbs(r, a); }
+            random_limbs(r, scratch);
+            for k in 32 { a[k] = if c == 0 { 0 } else { scratch[k] }; }
             let t0 = clock_ns();
             for k in 100 { acc = acc ^ bignum::ct_mod_small(a, 1999); }
             sample(s, c, clock_ns() - t0);

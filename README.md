@@ -260,7 +260,8 @@ for many messages. GHASH multiplies with integer multiplies on operands
 spread into 4-bit lanes (as in BearSSL's `ghash_ctmul64`), not with tables.
 Never reuse a nonce under one key. 12 bytes is the standard size; other
 lengths work too. A message is at most `GCM_MAX` bytes ((2^32 − 2) · 16,
-SP 800-38D): encrypting more aborts, as Go panics, and opening more fails.
+SP 800-38D): encrypting more aborts, as Go panics, and opening more fails;
+`gcm_fits(n)` is the check all four use.
 
 `bignum.modes` has the other modes of Go's crypto/cipher, written once
 over any block cipher with a `cipher_encrypt` overload (AES, DES and
@@ -409,7 +410,9 @@ take MD5, SHA-1, SHA-2 and SHA-3 but not BLAKE2, which has no DigestInfo
 prefix, data, len, min_len)` is HMAC-SHA-1 or -SHA-256 of prefix ‖
 data[..len] in time that depends on neither len nor the bytes, only on the
 public lengths, for TLS's CBC records (Lucky13), as OpenSSL's
-`ssl3_cbc_digest_record`.
+`ssl3_cbc_digest_record`. It takes prefix and data up to
+`HMAC_PREFIX_CT_MAX` (2^30 bytes) together, checked by
+`hmac_prefix_ct_fits`, since it compares positions as 32-bit numbers.
 `hkdf_extract`, `hkdf_expand` and `hkdf` cover HKDF. TLS 1.3's HKDF-Expand-Label is a
 few lines on top of `hkdf_expand` and is not included.
 

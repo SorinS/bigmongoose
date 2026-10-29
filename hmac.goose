@@ -115,6 +115,17 @@ fn hmac(bits: i64, key: const u8[:], msg: const u8[:]) -> u8[>..] {
     return hash2(bits, kpad[..bl], inner);
 }
 
+// The largest input hmac_prefix_ct takes, prefix and data together: its
+// byte positions, padding blocks included, are compared as 32-bit numbers,
+// so they must stay well below 2^32. Records are far smaller (TLS's are at
+// most 16 KB and a little).
+let HMAC_PREFIX_CT_MAX: i64 = 1 << 30;
+
+// Whether hmac_prefix_ct takes a prefix and data of these (public) lengths.
+fn hmac_prefix_ct_fits(prefix_len: i64, data_len: i64) -> bool {
+    prefix_len >= 0 && data_len >= 0 && prefix_len <= HMAC_PREFIX_CT_MAX && data_len <= HMAC_PREFIX_CT_MAX - prefix_len
+}
+
 // HMAC-SHA-1 or HMAC-SHA-256 (bits 160 or 256) of prefix ‖ data[..len],
 // in time that does not depend on len, nor on any byte's value: only on
 // key.len, prefix.len, data.len and min_len, all public. For TLS's CBC
@@ -124,10 +135,12 @@ fn hmac(bits: i64, key: const u8[:], msg: const u8[:]) -> u8[>..] {
 // min_len are hashed as usual; each block the message's end could fall in
 // is built byte by byte with masks (the data, the 0x80, the length in the
 // last), every one is compressed, and the state after the last is kept by
-// a mask. The key is at most 64 bytes.
+// a mask. The key is at most 64 bytes, and the input within
+// hmac_prefix_ct_fits.
 fn hmac_prefix_ct(bits: i64, key: const u8[:], prefix: const u8[:], data: const u8[:], len: i64,
                   min_len: i64) -> u8[>..] {
-    assert((bits == 160 || bits == 256) && key.len <= 64 && min_len >= 0 && min_len <= data.len);
+    assert((bits == 160 || bits == 256) && key.len <= 64 && min_len >= 0 && min_len <= data.len &&
+           hmac_prefix_ct_fits(prefix.len, data.len));
     var kpad: u8[64] = [0; 64];
     for i in key.len { kpad[i] = key[i]; }
     // The inner hash's input: ipad, prefix, data; its message is the first
