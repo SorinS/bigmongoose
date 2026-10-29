@@ -54,8 +54,10 @@ def openssl_figures(want):
                 got["x25519"] = float(f[3])
     if want("ed25519"):
         for f in speed("ed25519"):
-            if f[0] == "+F6":
+            if f[0] == "+F6":                    # OpenSSL 3
                 got["ed25519-sign"], got["ed25519-verify"] = float(f[4]), float(f[5])
+            elif f[0] == "+F4":                  # OpenSSL 4
+                got["ed25519-sign"], got["ed25519-verify"] = float(f[3]), float(f[4])
     for c in ("p224", "p256", "p384", "p521"):
         if want(f"ecdh-{c}"):
             for f in speed(f"ecdh{c}"):
