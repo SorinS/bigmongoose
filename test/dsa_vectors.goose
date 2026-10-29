@@ -104,6 +104,16 @@ fn main() {
     let s2 = bignum::dsa_sign(nk, "a digest of twenty b");
     let npub = bignum::dsa_public(nk);
     check("generated key signs", bignum::dsa_verify(npub, "a digest of twenty b", s2));
+    // Primality at the small end, where trial division meets Miller-Rabin.
+    let primes = bignum::small_primes();
+    var prime_ok = true;
+    for v in [-7, 0, 1, 4, 9, 15, 25, 1001, 3999, 4001 * 4003, 561, 1105, 2047] {
+        if bignum::dsa_probably_prime(bignum::big(v), primes) { prime_ok = false; print("composite called prime: ", v); }
+    }
+    for v in [2, 3, 5, 7, 97, 101, 251, 257, 1999, 2003, 65537, 4001 * 1000 + 3] {
+        if !bignum::dsa_probably_prime(bignum::big(v), primes) { prime_ok = false; print("prime called composite: ", v); }
+    }
+    check("dsa_probably_prime at the small end", prime_ok);
     print("dsa vectors: ", checks, " checks, ", failures, " failed");
     assert(failures == 0);
 }

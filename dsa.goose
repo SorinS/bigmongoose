@@ -123,8 +123,17 @@ fn dsa_generate_parameters(l: i64, n: i64) -> u8[>..], u8[>..], u8[>..] {
     }
 }
 
+// Whether v (a BigInt) is prime: trial division by `primes`
+// (small_primes()), then 64 Miller-Rabin rounds. Variable time, for public
+// candidates (DSA's parameters). Any v: negatives, 0 and 1 are not prime.
 fn dsa_probably_prime(v, primes: const u32[:]) -> bool {
+    // Small values first: below 2 none is prime, 2 is the even one, and a
+    // small prime is not composite for dividing itself. Miller-Rabin then
+    // gets only odd values above the small primes, as it needs.
+    if v.neg || cmp_i64(v, 2) < 0 { return false; }
+    if !is_odd(v) { return cmp_i64(v, 2) == 0; }
     for sp in primes {
+        if v.mag.len == 1 && v.mag[0] == sp { return true; }
         if ct_mod_small(v.mag, sp) == 0 { return false; }
     }
     return miller_rabin_vartime(v, 64);

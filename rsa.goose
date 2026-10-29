@@ -314,6 +314,9 @@ fn random_below(r: u32[:], m: const u32[:]) {
 // Miller-Rabin with `rounds` random bases, for odd p > 3. Variable time
 // (s and d come from BigInt): for public candidates, as DSA's p and q.
 fn miller_rabin_vartime(p, rounds: i64) -> bool {
+    // An odd p of 5 or more: below, p - 1 has no odd part to find (p = 1
+    // loops) or no base in [2, p - 1) to draw.
+    assert(is_odd(p) && cmp_i64(p, 5) >= 0);
     let n = p.mag.len;
     let m = p.mag;
     let m0i = mont_m0i(m[0]);
