@@ -8,5 +8,9 @@ test/*
 !test/timing/
 test/timing/*
 !test/timing/*.goose
+!test/wycheproof/
+test/wycheproof/*
+!test/wycheproof/*.goose
 *.c
+!tools/dudect/harness.c
 __pycache__/

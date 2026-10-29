@@ -554,6 +554,8 @@ python3 scripts/run_tests.py            # every test at -O0, -O2 and --debug, pl
 python3 scripts/run_tests.py --native   # also built with the C compiler
 python3 scripts/ct_audit.py             # BigInt only on public values (run_tests.py runs it)
 python3 scripts/ct_timing.py [scale]    # timing tests of the constant-time code (about 10 s)
+python3 scripts/wycheproof.py [file ...]   # Wycheproof's vectors (../wycheproof.git), about 20 minutes
+python3 scripts/dudect.py [--seconds S]    # dudect's own harness on the constant-time code (x86, ../dudect.git)
 python3 scripts/gen_vectors.py          # regenerate test/vectors from Python's integers
 tools/govectors.sh -check test/vectors/xcrypto.txt   # xcrypto.txt against Go's x/crypto (needs Go)
 tools/govectors.sh > test/vectors/xcrypto.txt   # regenerate it
@@ -576,6 +578,26 @@ tools/govectors.sh > test/vectors/xcrypto.txt   # regenerate it
   X25519, ECDSA on P-256 and Ed25519 signing. BigInt's `modpow` runs as a
   control and must be caught (it is, at |t| near 500; the others stay
   below 2).
+- `wycheproof/wycheproof` (`scripts/wycheproof.py`, not in run_tests.py):
+  Wycheproof's vectors, converted from its JSON, for every family this
+  package has an API for: AES-GCM, ChaCha20- and XChaCha20-Poly1305,
+  AES-CBC with PKCS #7, AES-XTS, HMAC, HKDF and PBKDF2 over SHA-1, SHA-2
+  and SHA-3, ECDH and ECDSA (DER and P1363) on P-224 to P-521, Ed25519,
+  X25519, RSA PKCS #1 v1.5 (signing, verifying, decryption), PSS and OAEP,
+  DSA, ML-KEM, ML-DSA and primality. A valid test must give Wycheproof's
+  output, an invalid one must be refused. What is not tried is listed with
+  its reason: curves and hashes this package does not have, PSS and OAEP
+  with an MGF hash other than the message's, RSA keys above 4096 bits, XTS
+  ciphertext stealing, ML-DSA signing from an expanded key.
+- `scripts/dudect.py` (x86 only): dudect itself (oreparaz/dudect,
+  `src/dudect.h` unchanged) times `tools/dudect/targets.goose`, the
+  constant-time code exported to C, in its own harness
+  (`tools/dudect/harness.c`): mont_modexp, ct_mod_inv, ct_mod_small, the
+  RSA private and constant-time public operations, X25519, ECDSA P-256 and
+  Ed25519 signing. Two controls must leak (an early-exit comparison, BigInt's
+  modpow) and a third, constant time by construction, sets the machine's
+  floor: a leak is t above 500, or above 10 with ten times that floor's
+  effect size.
 - `x25519_field`: GF(2^255 − 19) arithmetic against `BigInt`, including
   non-canonical encodings.
 - `x25519_rfc`: the RFC 7748 §5.2 vectors (with the 1,000-iteration chain)
