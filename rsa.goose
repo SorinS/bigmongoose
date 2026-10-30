@@ -689,21 +689,36 @@ fn pkcs1_encode(em: u8[:], bits: i64, digest: const u8[:]) {
 // DigestInfo, a key too small for it, or a fault (as Go's SignPKCS1v15
 // returns an error).
 fn rsa_sign_pkcs1(key: const RsaPrivateKey&, msg: const u8[:], hash: i64 = 256) -> u8[>..], bool {
+    if !has_digest_info(hash) { var none: u8[>..] = []; return none, false; }
+    let sig, ok = rsa_sign_pkcs1_digest(key, hash_bits(hash, msg), hash);
+    return sig, ok;
+}
+
+// The same over a digest made by `hash`, as Go's SignPKCS1v15 takes one:
+// also false for a digest of another length.
+fn rsa_sign_pkcs1_digest(key: const RsaPrivateKey&, digest: const u8[:], hash: i64 = 256) -> u8[>..], bool {
     var em: u8[>..] = [];
-    if !has_digest_info(hash) || rsa_size(key) < digest_info(hash).len + hash_len(hash) + 11 { return em, false; }
+    if !has_digest_info(hash) || digest.len != hash_len(hash) ||
+       rsa_size(key) < digest_info(hash).len + hash_len(hash) + 11 { return em, false; }
     em.resize(rsa_size(key), 0);
-    pkcs1_encode(em, hash, hash_bits(hash, msg));
+    pkcs1_encode(em, hash, digest);
     let sig, ok = rsa_private_op(key, em);
     return sig, ok;
 }
 
 // The encoding is rebuilt and compared whole, rather than parsed.
 fn rsa_verify_pkcs1(key, msg: const u8[:], sig: const u8[:], hash: i64 = 256) -> bool {
+    if !has_digest_info(hash) { return false; }
+    return rsa_verify_pkcs1_digest(key, hash_bits(hash, msg), sig, hash);
+}
+
+fn rsa_verify_pkcs1_digest(key, digest: const u8[:], sig: const u8[:], hash: i64 = 256) -> bool {
+    if !has_digest_info(hash) || digest.len != hash_len(hash) { return false; }
     let m, ok = rsa_public_op(key, sig);
-    if !ok || !has_digest_info(hash) || m.len < hash_len(hash) + 30 { return false; }
+    if !ok || m.len < hash_len(hash) + 30 { return false; }
     var em: u8[>..] = [];
     em.resize(m.len, 0);
-    pkcs1_encode(em, hash, hash_bits(hash, msg));
+    pkcs1_encode(em, hash, digest);
     return ct_eq_bytes(em, m) == 1;
 }
 
@@ -724,13 +739,21 @@ fn pss_hash(bits: i64, mhash: const u8[:], salt: const u8[:]) -> u8[>..] {
 // hash and salt, or a fault (as Go's SignPSS returns an error).
 fn rsa_sign_pss_with_salt(key: const RsaPrivateKey&, msg: const u8[:], salt: const u8[:],
                           hash: i64 = 256) -> u8[>..], bool {
+    let sig, ok = rsa_sign_pss_digest_with_salt(key, hash_bits(hash, msg), salt, hash);
+    return sig, ok;
+}
+
+// The same over a digest made by `hash` (as Go's SignPSS takes one): also
+// false for a digest of another length.
+fn rsa_sign_pss_digest_with_salt(key: const RsaPrivateKey&, digest: const u8[:], salt: const u8[:],
+                                 hash: i64 = 256) -> u8[>..], bool {
     let hl = hash_len(hash);
     let k = rsa_size(key);
     let embits = rsa_bits(key) - 1;
     let emlen = (embits + 7) / 8;
     var em: u8[>..] = [];
-    if emlen < hl + salt.len + 2 { return em, false; }
-    let h = pss_hash(hash, hash_bits(hash, msg), salt);
+    if digest.len != hl || emlen < hl + salt.len + 2 { return em, false; }
+    let h = pss_hash(hash, digest, salt);
     // em holds EM right-aligned: one leading zero byte when emlen < k.
     em.resize(k, 0);
     let off = k - emlen;
@@ -754,8 +777,21 @@ fn rsa_sign_pss(key: const RsaPrivateKey&, msg: const u8[:], salt_len: i64 = -1,
     return rsa_sign_pss_with_salt(key, msg, salt, hash);
 }
 
+fn rsa_sign_pss_digest(key: const RsaPrivateKey&, digest: const u8[:], salt_len: i64 = -1, hash: i64 = 256)
+        -> u8[>..], bool {
+    var salt: u8[>..] = [];
+    salt.resize(if salt_len < 0 { hash_len(hash) } else { salt_len }, 0);
+    random_bytes(salt);
+    return rsa_sign_pss_digest_with_salt(key, digest, salt, hash);
+}
+
 fn rsa_verify_pss(key, msg: const u8[:], sig: const u8[:], salt_len: i64 = -1, hash: i64 = 256) -> bool {
+    return rsa_verify_pss_digest(key, hash_bits(hash, msg), sig, salt_len, hash);
+}
+
+fn rsa_verify_pss_digest(key, digest: const u8[:], sig: const u8[:], salt_len: i64 = -1, hash: i64 = 256) -> bool {
     let hl = hash_len(hash);
+    if digest.len != hl { return false; }
     let slen = if salt_len < 0 { hl } else { salt_len };
     let m, ok = rsa_public_op(key, sig);
     if !ok { return false; }
@@ -778,7 +814,7 @@ fn rsa_verify_pss(key, msg: const u8[:], sig: const u8[:], salt_len: i64 = -1, h
     let ps = dblen - slen - 1;
     for i in ps { if db[i] != 0 { return false; } }
     if db[ps] != 1 { return false; }
-    let h2 = pss_hash(hash, hash_bits(hash, msg), db[ps + 1..]);
+    let h2 = pss_hash(hash, digest, db[ps + 1..]);
     return ct_eq_bytes(h2, h) == 1;
 }
 

@@ -192,8 +192,8 @@ as Go's do.
 | Group | Functions |
 |---|---|
 | Keys | `rsa_generate(bits, e = 65537)` (1024 to 8192, a multiple of 64; e odd, 3 to 2^31 − 1), `rsa_key_from(n, e, d, p, q) -> key, bool`, `rsa_key_from_bytes(n, e, d, p, q)` (big-endian, as PKCS #1 holds them), `rsa_public_from(n, e) -> pub, bool` (n 1024 to 8192 bits, Go's limit for TLS peers' keys; e odd, 3 to 2^31 − 1, as in Go), `rsa_public(key)`, `rsa_bits`, `rsa_size` |
-| PKCS #1 v1.5 | `rsa_sign_pkcs1(key, msg, hash = 256) -> sig, bool`, `rsa_verify_pkcs1(pub, msg, sig, hash = 256)` |
-| PSS | `rsa_sign_pss(key, msg, salt_len = -1, hash = 256) -> sig, bool`, `rsa_sign_pss_with_salt(key, msg, salt, hash = 256) -> sig, bool`, `rsa_verify_pss(pub, msg, sig, salt_len = -1, hash = 256)`; a salt_len of -1 means the hash's length |
+| PKCS #1 v1.5 | `rsa_sign_pkcs1(key, msg, hash = 256) -> sig, bool`, `rsa_verify_pkcs1(pub, msg, sig, hash = 256)`; over a digest, `rsa_sign_pkcs1_digest(key, digest, hash = 256)` and `rsa_verify_pkcs1_digest(pub, digest, sig, hash = 256)` |
+| PSS | `rsa_sign_pss(key, msg, salt_len = -1, hash = 256) -> sig, bool`, `rsa_sign_pss_with_salt(key, msg, salt, hash = 256) -> sig, bool`, `rsa_verify_pss(pub, msg, sig, salt_len = -1, hash = 256)`; a salt_len of -1 means the hash's length; over a digest, `rsa_sign_pss_digest(key, digest, salt_len = -1, hash = 256)`, `rsa_sign_pss_digest_with_salt` and `rsa_verify_pss_digest(pub, digest, sig, salt_len = -1, hash = 256)` |
 | OAEP | `rsa_encrypt_oaep(pub, msg, label = "", hash = 256)`, `rsa_encrypt_oaep_with_seed`, `rsa_decrypt_oaep(key, ct, label = "", hash = 256) -> msg, bool`, `rsa_oaep_max(key, hash = 256)` |
 | PKCS #1 v1.5 encryption | `rsa_encrypt_pkcs1(pub, msg)`, `rsa_decrypt_pkcs1(key, ct) -> msg, bool`, `rsa_decrypt_pkcs1_session_key(key, ct, key_out) -> bool` |
 | Raw | `rsa_public_op(pub, x)`, `rsa_private_op(key, x) -> bytes, bool` |

@@ -128,6 +128,25 @@ fn main() {
     check("pkcs1 other key", !bignum::rsa_verify_pkcs1(other, "message", s1));
     check("pss other key", !bignum::rsa_verify_pss(other, "message", s2));
     check("pkcs1 is not pss", !bignum::rsa_verify_pss(pub, "message", s1));
+    // Over a digest, as Go's SignPKCS1v15 and SignPSS take one.
+    let d256 = bignum::hash_bits(256, "message");
+    let d384 = bignum::hash_bits(384, "message");
+    let s6, ok_s6 = bignum::rsa_sign_pkcs1_digest(key, d256);
+    check("pkcs1 digest", ok_s6 && s6 == s1);
+    check("pkcs1 digest verifies", bignum::rsa_verify_pkcs1_digest(pub, d256, s1));
+    check("pkcs1 digest other", !bignum::rsa_verify_pkcs1_digest(pub, bignum::hash_bits(256, "messagf"), s1));
+    let s7, ok_s7 = bignum::rsa_sign_pkcs1_digest(key, d384, 384);
+    check("pkcs1 digest sha384", ok_s7 && bignum::rsa_verify_pkcs1(pub, "message", s7, 384));
+    let s8, ok_s8 = bignum::rsa_sign_pkcs1_digest(key, d384);
+    check("pkcs1 digest length", !ok_s8 && s8.len == 0);
+    check("pkcs1 verify digest length", !bignum::rsa_verify_pkcs1_digest(pub, d384, s1));
+    check("pss digest verifies", bignum::rsa_verify_pss_digest(pub, d256, s2));
+    check("pss digest other", !bignum::rsa_verify_pss_digest(pub, bignum::hash_bits(256, "messagf"), s2));
+    let s9, ok_s9 = bignum::rsa_sign_pss_digest(key, d384, -1, 384);
+    check("pss digest sha384", ok_s9 && bignum::rsa_verify_pss(pub, "message", s9, -1, 384));
+    let s10, ok_s10 = bignum::rsa_sign_pss_digest(key, d384);
+    check("pss digest length", !ok_s10 && s10.len == 0);
+    check("pss verify digest length", !bignum::rsa_verify_pss_digest(pub, d384, s2));
     let biggest = bignum::rsa_oaep_max(pub);
     check("oaep max", biggest == 62);
     var long: u8[>..] = [];
