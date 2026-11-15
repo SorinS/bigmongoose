@@ -1,6 +1,6 @@
 """Every primitive's speed against openssl's on this machine.
 
-Builds examples/speed.goose natively, runs it, measures the same
+Builds examples//speed.goose natively, runs it, measures the same
 operations with `openssl speed` (16 KiB buffers, the EVP interface, so
 openssl uses its assembly and the CPU's crypto instructions where it has
 them), PBKDF2 and scrypt through hashlib (which calls OpenSSL), and

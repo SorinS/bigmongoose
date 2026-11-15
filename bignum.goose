@@ -18,13 +18,16 @@
 // - `bignum.ct`: masks, selects, swaps, comparisons, fixed-width add and
 //   subtract;
 // - `bignum.mont`: Montgomery arithmetic, reduction, `mont_modexp`;
-// - `bignum.x25519`, and `bignum.ed25519` signing;
+// - `bignum.x25519` and `bignum.x448`, and `bignum.ed25519` and
+//   `bignum.ed448` signing;
 // - `bignum.ec`: ECDH and ECDSA signing on the NIST curves;
 // - `bignum.rsa`: key generation, key loading, the private-key operation
 //   (CRT, blinded) and encryption; `bignum.dsa` signing and `bignum.ffdh`,
 //   all built on `ct` and `mont`;
-// - `bignum.aes`, `bignum.gcm`, `bignum.des`, `bignum.mlkem` and
-//   `bignum.mldsa` need no bignum, and are constant time themselves.
+// - `bignum.aes`, `bignum.gcm`, `bignum.camellia`, `bignum.cmac`,
+//   `bignum.des`, `bignum.mlkem`, `bignum.mldsa` and `bignum.slhdsa`
+//   need no bignum, and are constant time themselves (SLH-DSA's secrets
+//   only enter hashes; what it branches on is in the signature).
 // What still uses this layer outside it works on public values only:
 // RSA signature verification, DSA's domain parameters and verification,
 // and the like; scripts/ct_audit.py lists each use and why.

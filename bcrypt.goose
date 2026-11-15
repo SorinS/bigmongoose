@@ -122,7 +122,7 @@ fn bcrypt_parse(h: const u8[:]) -> u8, i64, u8[>..], i64, bool {
     if h.len < n + 3 + 22 + 31 || h[n] < '0' || h[n] > '9' || h[n + 1] < '0' || h[n + 1] > '9' || h[n + 2] != '$' {
         return 0, 0, salt, 0, false;
     }
-    let cost = (h[n] - '0') as i64 * 10 + (h[n + 1] - '0') as i64;
+    let cost = (h[n] - '0') as i64 * 10 + (h[n + 1] - '0');
     if cost < BCRYPT_MIN_COST || cost > BCRYPT_MAX_COST { return 0, 0, salt, 0, false; }
     let s, ok = bcrypt_b64_decode(h[n + 3..n + 25]);
     if !ok || s.len != 16 { return 0, 0, salt, 0, false; }
@@ -132,6 +132,9 @@ fn bcrypt_parse(h: const u8[:]) -> u8, i64, u8[>..], i64, bool {
 // CompareHashAndPassword: whether password hashes to h, compared in
 // constant time.
 fn bcrypt_verify(h: const u8[:], password: const u8[:]) -> bool {
+    // bcrypt_hash refuses a longer password, and bcrypt itself would only
+    // read its first 72 bytes: anything typed after them must not match.
+    if password.len > 72 { return false; }
     let minor, cost, salt, at, ok = bcrypt_parse(h);
     if !ok { return false; }
     let again = bcrypt_format(minor, cost, salt, bcrypt_raw(password, cost, salt));

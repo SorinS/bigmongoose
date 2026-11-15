@@ -30,7 +30,7 @@ import bignum.kdf;
 import bignum.argon2;
 
 let SECS: f64 = 0.5;
-let BUF: i64 = 16384;
+let BUF:  i64 = 16384;
 
 var only: u8[>..] = [];
 

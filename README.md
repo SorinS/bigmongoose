@@ -13,14 +13,21 @@ language, written in Goose: a foundation for cryptography.
 - **`bignum.mont`**: constant-time Montgomery arithmetic for an odd modulus
   (multiply, exponentiate, reduce).
 - **`bignum.x25519`**: X25519 Diffie-Hellman (RFC 7748), constant time.
-- **`bignum.ec`**: P-224, P-256, P-384 and P-521: ECDH and deterministic ECDSA
-  (RFC 6979), constant time.
+- **`bignum.x448`**: X448 Diffie-Hellman (RFC 7748), constant time.
+- **`bignum.ec`**: P-224, P-256, P-384, P-521 and brainpoolP256r1, P384r1
+  and P512r1 (RFC 5639): ECDH and deterministic ECDSA (RFC 6979), constant
+  time.
 - **`bignum.ed25519`**: Ed25519 signatures (RFC 8032), with Ed25519ctx and
   Ed25519ph; constant-time signing.
+- **`bignum.ed448`**: Ed448 signatures (RFC 8032), with contexts and
+  Ed448ph; constant-time signing.
 - **`bignum.mlkem`**: ML-KEM-512/768/1024 (FIPS 203), post-quantum key
   encapsulation, constant time.
 - **`bignum.mldsa`**: ML-DSA-44/65/87 (FIPS 204), post-quantum signatures,
   hedged or deterministic, with contexts and external mu; constant time.
+- **`bignum.slhdsa`**: SLH-DSA (FIPS 205), stateless hash-based
+  signatures, all twelve SHA2 and SHAKE sets, hedged or deterministic,
+  with contexts, HashSLH-DSA and the internal interface.
 - **`bignum.hpke`**: HPKE (RFC 9180), all four modes, with DHKEM over
   P-256/384/521 and X25519, ML-KEM and the ML-KEM hybrids (X-Wing among
   them), HKDF and SHAKE KDFs, AES-GCM, ChaCha20-Poly1305 and export-only.
@@ -37,7 +44,14 @@ language, written in Goose: a foundation for cryptography.
   raised in constant time. A secret exponent is at least 224 bits (NIST SP
   800-56A, RFC 7919 §5.2).
 - **`bignum.aes`**: AES-128/192/256 and CTR mode, bitsliced, constant time.
+- **`bignum.camellia`**: Camellia-128/192/256 (RFC 3713), constant time:
+  its S-box runs as the AES one's bitsliced circuit between two affine maps.
+- **`bignum.cmac`**: CMAC (SP 800-38B, RFC 4493) over any 8- or 16-byte
+  block cipher here: AES-CMAC, Camellia-CMAC; constant time when the
+  cipher is.
 - **`bignum.gcm`**: AES-GCM authenticated encryption, constant time.
+- **`bignum.keywrap`**: AES Key Wrap (RFC 3394, SP 800-38F KW) and with
+  padding (RFC 5649, KWP), constant time; JOSE's A*KW uses it.
 - **`bignum.modes`**: CBC, CFB, OFB and CTR over any of the block ciphers,
   XTS over 16-byte ones, and PKCS #7 padding.
 - **`bignum.des`**: DES and triple DES, for legacy data.
@@ -55,6 +69,8 @@ language, written in Goose: a foundation for cryptography.
 - **`bignum.sha512`**: SHA-512, SHA-384, SHA-512/224 and SHA-512/256.
 - **`bignum.sha1`**: SHA-1, for what still needs it.
 - **`bignum.sha3`**: SHA3-224/256/384/512, SHAKE128/256 and cSHAKE.
+- **`bignum.kmac`**: KMAC128 and KMAC256 (NIST SP 800-185), the keyed MAC
+  over cSHAKE; OpenPGP's post-quantum key combiner uses it.
 - **`bignum.md4`**, **`bignum.ripemd160`**: MD4 and RIPEMD-160, for the
   formats that still carry them.
 - **`bignum.md5`**: MD5, for what still needs it.
@@ -69,7 +85,7 @@ language, written in Goose: a foundation for cryptography.
 
 ```goose
 import std;
-import bignum from "../bigmongoose.git";       // a path, or a git source once published
+import bignum from "SorinS/bigmongoose@v0.7.0";
 
 fn main() {
     let a, ok = bignum::parse("123456789012345678901234567890");
@@ -81,7 +97,7 @@ fn main() {
 ```
 
 ```goose
-import bignum from "../bigmongoose.git";
+import bignum from "SorinS/bigmongoose@v0.7.0";
 import bignum.x25519;
 
 let sk, pk = bignum::x25519_keypair();
@@ -89,7 +105,7 @@ let secret, ok = bignum::x25519_shared(sk, peer_pk);   // ok is false for a low-
 ```
 
 ```goose
-import bignum from "../bigmongoose.git";
+import bignum from "SorinS/bigmongoose@v0.7.0";
 import bignum.rsa;
 import bignum.gcm;
 
@@ -105,7 +121,7 @@ let opened, ok2 = bignum::aes_gcm_open(key32, nonce12, aad, sealed);  // ok2 fal
 ```
 
 ```goose
-import bignum from "../bigmongoose.git";
+import bignum from "SorinS/bigmongoose@v0.7.0";
 import bignum.ec;
 import bignum.ed25519;
 import bignum.hmac;
@@ -156,7 +172,7 @@ Algorithm D.
   own input. Use `add_to(x, y)`, or `let t = add(x, y); x = copy(t);`.
 - A `BigInt` is resizable, so it cannot be an array element and `==` does
   not apply. Use `eq`, and keep collections as limb arrays (see
-  `examples/factorial.goose`).
+  gslib's `examples/factorial.goose`).
 
 ## Layer 2: constant time
 
@@ -261,11 +277,12 @@ spread into 4-bit lanes (as in BearSSL's `ghash_ctmul64`), not with tables.
 Never reuse a nonce under one key. 12 bytes is the standard size; other
 lengths work too. A message is at most `GCM_MAX` bytes ((2^32 − 2) · 16,
 SP 800-38D): encrypting more aborts, as Go panics, and opening more fails;
-`gcm_fits(n)` is the check all four use.
+`gcm_fits(n)` is the check all four use. Opening with a key of the wrong
+length or an empty nonce returns false rather than aborting.
 
 `bignum.modes` has the other modes of Go's crypto/cipher, written once
-over any block cipher with a `cipher_encrypt` overload (AES, DES and
-triple DES here). Each works in place from a one-block IV:
+over any block cipher with a `cipher_encrypt` overload (AES, Camellia, DES
+and triple DES here). Each works in place from a one-block IV:
 - `cbc_encrypt` and `cbc_decrypt` take whole blocks;
 - `cfb_encrypt` and `cfb_decrypt` (full-block segments, CFB-128 for AES),
   `ofb_xor` and `ctr_xor` take any length.
@@ -275,17 +292,46 @@ and remove CBC padding; unpadding checks in constant time. Without a MAC
 checked first, a CBC decryption that reports bad padding is still a
 padding oracle, so prefer an AEAD.
 
+`camellia_init(key)` expands a 16-, 24- or 32-byte Camellia key (RFC
+3713), with `camellia_encrypt_block` and `camellia_decrypt_block`, and
+works with every mode. No table is indexed by data: Camellia's s1 is
+A2(S(A1(x))) for the AES S-box S and two affine maps (A1 holds the
+spec's 0xc5), so F's eight S-boxes are bignum.aes's bitsliced circuit on
+eight bit planes, one byte a lane, with A1 and A2 as XORs of planes and
+s2, s3, s4's bit rotations as masked moves between planes. The maps were
+found by a linear-equivalence search, which `scripts/camellia_vectors.py`
+repeats, and are checked on all 256 bytes against RFC 3713's SBOX1.
+
+`cmac(k, msg)` is CMAC over any of these ciphers with 8- or 16-byte
+blocks (a block of tag), and `cmac_verify(k, msg, tag)` compares a tag of
+8 to a block's bytes (truncated CMACs are the leading bytes) in constant
+time; a shorter tag is refused, as the tag's length comes with it.
+`cmac_verify_len(k, msg, tag, tag_len)` takes the length from the caller
+(1 to a block) and refuses a tag of any other length.
+
 `des_init(key8)` and `des3_init(key24)` expand DES and triple-DES (EDE)
 keys, with `des_encrypt_block` / `des3_encrypt_block` and their decrypt
 forms. The S-boxes are bit masks selected by shifts, so no table is read
 at a secret index. `rc4_init(key)` and `rc4_xor(r, data)` are RC4, which
 is broken and, as in Go, indexes its state by secret values.
 
+
+### AES Key Wrap
+
+`aes_key_wrap(kek, key)` wraps a key of 16 bytes or more, a multiple of 8,
+under a 16-, 24- or 32-byte AES key: 8 bytes longer. `aes_key_unwrap`
+returns the key and true, or nothing and false. `aes_key_wrap_pad` and
+`aes_key_unwrap_pad` are RFC 5649's form for keys of any length from one
+byte. Unwrapping checks the integrity value (and KWP's length and zero
+padding) under masks, so a wrong KEK and a changed byte fail alike and in
+the same time. test/keywrap_vectors.goose holds RFC 3394 §4's and RFC
+5649 §6's vectors.
 ### ChaCha20-Poly1305
 
 `chacha20_poly1305_seal(key, nonce, aad, pt)` / `_open` and the in-place
 `_encrypt` / `_decrypt`, with the same contract as GCM: 32-byte key,
-12-byte nonce, 16-byte tag, nothing released on a bad tag. The pieces are
+12-byte nonce, 16-byte tag, nothing released on a bad tag; opening with a
+key or nonce of the wrong length returns false. The pieces are
 public too: `chacha20_block`, `chacha20_xor(key, counter, nonce, data)`,
 and `poly1305` one-shot or streaming. A message is at most
 `CHACHA20_POLY1305_MAX` bytes ((2^32 − 1) · 64, RFC 8439): encrypting more
@@ -301,23 +347,28 @@ says whether it would. Poly1305 uses five 26-bit limbs
 
 ### Elliptic curves
 
-`bignum.ec` handles P-224, P-256, P-384 and P-521 with one generic
-implementation. `p224()`, `p256()`, `p384()` and `p521()` return a `Curve`
+`bignum.ec` handles P-224, P-256, P-384, P-521 and the Brainpool r1 curves
+brainpoolP256r1, P384r1 and P512r1 (RFC 5639, as RFC 7027 and RFC 8734
+use them in TLS) with one generic implementation. `p224()`, `p256()`,
+`p384()`, `p521()`, `bp256()`, `bp384()` and `bp512()` return a `Curve`
 holding the field prime, the group
-order, their Montgomery constants and the generator; build one and pass it
+order, their Montgomery constants, the coefficients and the generator; build one and pass it
 to every call. Field elements are limbs of the curve's width in Montgomery
 form, multiplied by `bignum.mont`. Points are projective and added with
-the complete formulas of Renes, Costello and Batina for a = −3. Those have
+the complete formulas of Renes, Costello and Batina: their algorithm 4
+for a = −3 (the NIST curves), algorithm 1 for any a (Brainpool's, three
+more multiplications per addition). Those have
 no exceptional cases, so doubling is just an addition and the point at
 infinity needs no branch. Scalar multiplication uses 4-bit windows across
 the whole scalar width and reads its table by scanning every entry.
 
 | Group | Functions |
 |---|---|
-| Keys | `ec_keypair(c) -> sk, pk`, `ec_public_key(c, sk)`; private keys are `len` big-endian bytes (28, 32, 48 or 66), public keys the uncompressed 04 ‖ x ‖ y |
+| Keys | `ec_keypair(c) -> sk, pk`, `ec_public_key(c, sk)`; private keys are `len` big-endian bytes (28, 32, 48, 64 or 66), public keys the uncompressed 04 ‖ x ‖ y |
 | ECDH | `ecdh_shared(c, sk, peer) -> x, bool`: false unless the peer's point is on the curve and correctly encoded |
-| ECDSA | `ecdsa_sign(c, sk, msg)`, `ecdsa_verify(c, pk, msg, sig)` with SHA-224 on P-224, SHA-256 on P-256, SHA-384 on P-384 and SHA-512 on P-521; `ecdsa_sign_digest` and `ecdsa_verify_digest` for any hash |
+| ECDSA | `ecdsa_sign(c, sk, msg)`, `ecdsa_verify(c, pk, msg, sig)` with SHA-224 on P-224, SHA-256 on P-256 and brainpoolP256r1, SHA-384 on P-384 and brainpoolP384r1 and SHA-512 on P-521 and brainpoolP512r1; `ecdsa_sign_digest` and `ecdsa_verify_digest` for any hash |
 | DER | `ecdsa_sig_to_der(raw)`, `ecdsa_sig_from_der(c, der) -> raw, bool` (strict: minimal integers, no trailing bytes) |
+| Points | `ec_encode`/`ec_decode` (uncompressed, checked on the curve), `ec_encode_compressed`/`ec_decode_compressed` (SEC 1's 02/03 ‖ x; every curve but P-224, as their p is 3 mod 4), `ec_add`, `ec_neg`, `ec_mul` (krb5's SPAKE uses them) |
 
 ECDSA nonces come from RFC 6979's HMAC-DRBG, so signing needs no
 randomness and the same input always gives the same signature.
@@ -333,6 +384,27 @@ Ed25519ctx, with a context of 1 to 255 bytes. `ed25519_sign_ph(seed,
 digest, ctx = "")` / `ed25519_verify_ph` are Ed25519ph. As in Go, they
 take the message's SHA-512 digest, not the message.
 
+`bignum.x448` and `bignum.ed448` are the same for Curve448. A field
+element of GF(2^448 − 2^224 − 1) is sixteen signed limbs of 28 bits, so
+every product and sum fits an i64 with no wider multiply, and reduction
+folds the top half back with 2^448 ≡ 2^224 + 1. The multiply and square
+are unrolled. `x448(scalar, u)` runs a ladder of 448 fixed steps;
+`x448_base(scalar)`, `x448_keypair() -> sk, pk` and `x448_shared(sk,
+peer) -> secret, bool` (false for an all-zero secret, from a low-order
+peer) take and give 56 bytes. Ed448 uses projective coordinates with the
+RFC's complete addition and doubling on the untwisted curve, and SHAKE256
+throughout. Its keys are 57 bytes and its signatures 114:
+`ed448_keypair() -> seed, pk`, `ed448_public(seed)`, `ed448_sign(seed,
+msg, ctx = "")`, `ed448_verify(pk, msg, sig, ctx = "")`. Every Ed448
+signature carries dom4, so a context of 0 to 255 bytes goes with plain
+Ed448 too. `ed448_sign_ph(seed, digest, ctx = "")` / `ed448_verify_ph`
+are Ed448ph, taking the 64-byte SHAKE256 digest from
+`ed448_prehash(msg)`, as `ed25519_sign_ph` takes a SHA-512 digest.
+Verification uses [4]SB = [4]R + [4]kA and rejects S ≥ L and
+non-canonical encodings. In a native build (Apple M1, -O2) one X448 takes
+about 460 µs, five times X25519, and an Ed448 signature or verification
+about 1 ms, three times Ed25519.
+
 ### ML-KEM
 
 `mlkem_keygen(k)` gives a 64-byte seed (the private key, as in Go's
@@ -340,7 +412,8 @@ crypto/mlkem) and the encapsulation key; k is 2, 3 or 4 for ML-KEM-512,
 -768 or -1024. `mlkem_encaps(k, ek) -> secret, ct, ok` refuses a malformed
 ek (wrong length, or a coefficient of q or more). `mlkem_decaps(k, seed,
 ct) -> secret, ok` and `mlkem_decaps_dk(k, dk, ct)` decapsulate, from the
-seed or from the expanded key that `mlkem_keys_from_seed` gives. A
+seed or from the expanded key, the second result of
+`mlkem_keys_from_seed(k, seed) -> ek, dk`. A
 ciphertext that does not re-encrypt to itself yields the implicit
 rejection key J(z ‖ c), selected with a mask. `mlkem_encaps_with` takes
 the message, for tests. Every reduction mod q, including Compress's
@@ -363,6 +436,55 @@ reductions with masked corrections and Decompose is a multiply and shift,
 so the secret side never divides or branches on secret values; the
 rejection loop's restarts are public, as the standard allows.
 
+### SLH-DSA
+
+The set is one of `SLHDSA_SHA2_128S`, `SLHDSA_SHA2_128F`, ... up to
+`SLHDSA_SHAKE_256F` (1 to 12, in the order of their OIDs, .20 to .31);
+`slhdsa_name(set)` gives "SLH-DSA-SHA2-128s" and so on, and
+`slhdsa_set_of_name` reads it back. `slhdsa_keygen(set)` gives the private
+key (SK.seed ‖ SK.prf ‖ PK.seed ‖ PK.root, 4n bytes) and the public key
+(PK.seed ‖ PK.root); `slhdsa_key_from_seed(set, seed)` makes them from the
+3n-byte seed openssl and ACVP take, and `slhdsa_keygen_internal` from its
+three parts. `slhdsa_public_key(set, sk)` is the key's tail, and
+`slhdsa_check_key` recomputes PK.root (as costly as a key generation).
+`slhdsa_sign(set, sk, msg, ctx = "")` is hedged (n fresh random bytes),
+`slhdsa_sign_deterministic` is not, and `slhdsa_sign_with` takes the
+randomness; contexts run to 255 bytes. `slhdsa_verify(set, pk, msg, sig,
+ctx = "")` refuses wrong lengths. HashSLH-DSA is `slhdsa_hash_sign(set, sk,
+msg, ph, ctx = "")` (and `_deterministic`, `_with`) and
+`slhdsa_hash_verify`, with `ph` one of hmac's `HASH_*` numbers for SHA-224
+to SHA-512, SHA-512/224, SHA-512/256 and SHA3-224 to SHA3-512, or
+`SLHDSA_PH_SHAKE128` / `SLHDSA_PH_SHAKE256`. `slhdsa_sign_internal` and
+`slhdsa_verify_internal` take the prepared message M', as ACVP's internal
+interface does.
+
+| Set | n | public key | signature | keygen | sign | verify |
+|---|---|---|---|---|---|---|
+| SHA2-128s | 16 | 32 | 7856 | 0.29 s | 2.3 s | 2 ms |
+| SHA2-128f | 16 | 32 | 17088 | 4 ms | 0.10 s | 6 ms |
+| SHA2-192s | 24 | 48 | 16224 | 0.47 s | 4.7 s | 4 ms |
+| SHA2-192f | 24 | 48 | 35664 | 7 ms | 0.20 s | 11 ms |
+| SHA2-256s | 32 | 64 | 29792 | 0.33 s | 4.3 s | 6 ms |
+| SHA2-256f | 32 | 64 | 49856 | 20 ms | 0.44 s | 12 ms |
+| SHAKE-128s | 16 | 32 | 7856 | 0.33 s | 2.5 s | 3 ms |
+| SHAKE-128f | 16 | 32 | 17088 | 5 ms | 0.12 s | 7 ms |
+| SHAKE-192s | 24 | 48 | 16224 | 0.54 s | 4.8 s | 4 ms |
+| SHAKE-192f | 24 | 48 | 35664 | 8 ms | 0.21 s | 12 ms |
+| SHAKE-256s | 32 | 64 | 29792 | 0.38 s | 4.5 s | 7 ms |
+| SHAKE-256f | 32 | 64 | 49856 | 24 ms | 0.57 s | 14 ms |
+
+(Under the JIT at -O2 on an Apple M-series machine; openssl is several
+times faster.) The "s" sets are slow by design, so the module spends its
+effort on the hashes: each tweakable hash is one compression, with SHA2's
+PK.seed block hashed once per key and its midstate kept, SHAKE's inputs
+absorbed a lane at a time, and Keccak-f and the SHA-256 and SHA-512
+compressions in local variables (unrolled), three to ten times faster than
+the general ones in `sha3`, `sha256` and `sha512`. Each XMSS and FORS tree
+is built once per signature, giving its root, the authentication path and
+the WOTS+ signature together. Secrets (SK.seed, SK.prf) only enter hashes;
+the tree and leaf indices, FORS indices and WOTS+ digits that the code
+branches on or indexes by are all in the signature.
+
 ### HPKE
 
 Algorithms are named by their RFC 9180 and draft-ietf-hpke-pq ids
@@ -376,7 +498,10 @@ kdf, aead, sk, enc, info, psk, psk_id, pk_s)` set up a context; a PSK
 selects the PSK modes and a sender key the authenticated ones (DHKEM
 only; the SHAKE KDFs, as in Go, run in base mode only). Then
 `hpke_seal(ctx, aad, pt)`, `hpke_open` (which leaves the sequence number
-alone on failure) and `hpke_export(ctx, exporter_context, n)`.
+alone on failure) and `hpke_export(ctx, exporter_context, n) -> bytes, ok`
+(false for n above HKDF's 255 * Nh, or 65535 for a SHAKE KDF). With a
+SHAKE KDF, an info, PSK or PSK id of 64 KiB or more is refused, as its
+length prefix is 16 bits.
 `hpke_seal_once` and `hpke_open_once` are Go's single-shot `Seal` and
 `Open`: the encapsulated key followed by the ciphertext.
 
@@ -423,13 +548,15 @@ few lines on top of `hkdf_expand` and is not included.
 - `salsa20_xor(key, nonce, data)`: Salsa20 for an 8-byte nonce, XSalsa20
   for a 24-byte one, in place; `hsalsa20(key, input16)`.
 - NaCl: `secretbox_seal(msg, nonce, key)` (tag first, as NaCl) and
-  `secretbox_open`; `box_keypair`, `box_precompute`, `box_seal(msg, nonce,
+  `secretbox_open` (false, not an abort, for a key or nonce of the wrong
+  length, as `box_open` for keys); `box_keypair`, `box_precompute`, `box_seal(msg, nonce,
   peer_pk, sk)`, `box_open`, `box_seal_anonymous(msg, pk)` and
   `box_open_anonymous(sealed, pk, sk)`; `nacl_sign(msg, sk64)` and
   `nacl_sign_open`; `nacl_auth(msg, key)` and `nacl_auth_verify`.
 - `bcrypt_hash(password, cost = 10) -> hash, ok` ("$2a$", false past 72
   bytes or for a cost above 31), `bcrypt_verify(hash, password)` (in
-  constant time; $2b$ and $2y$ too) and `bcrypt_cost(hash)`;
+  constant time; $2b$ and $2y$ too; false for a password past 72 bytes,
+  whose tail bcrypt would never read) and `bcrypt_cost(hash)`;
   `bcrypt_pbkdf(password, salt, rounds, key_len) -> key, ok` (false for
   an empty password or salt, rounds below 1 or a key over 1024 bytes).
 - `blowfish_init(key)`, `cast5_init(key16)`, `twofish_init(key)`,
@@ -446,7 +573,7 @@ few lines on top of `hkdf_expand` and is not included.
 | `argon2id_key(password, salt, t, m, p, len)` | Go's `argon2.IDKey`: t passes over m KiB with p lanes. The one to use for passwords. |
 | `argon2i_key(...)` | Go's `argon2.Key` (Argon2i) |
 | `argon2(kind, password, salt, secret, ad, t, m, p, len)` | `ARGON2D`, `ARGON2I` or `ARGON2ID`, with the optional secret key and associated data |
-| `scrypt(password, salt, n, r, p, len) -> key, bool` | as `scrypt.Key`; false for bad parameters |
+| `scrypt(password, salt, n, r, p, len) -> key, bool` | as `scrypt.Key`; false for bad parameters (n above 2^32 among them) |
 | `pbkdf2(hash, password, salt, iter, len)` | over HMAC with any hash id, as `crypto/pbkdf2` |
 
 The lanes of Argon2 are filled one after another, which gives the same
@@ -539,8 +666,9 @@ generation takes about 0.27 s on average (ten runs, in constant time).
 - The P-256/P-384 code is generic over the prime. On the same machine,
   OpenSSL's ECDH (specialized, with assembly) is 27 times faster on P-256
   and 15 times faster on P-384.
-- Point compression is not supported. TLS 1.3 sends only uncompressed
-  points.
+- Compressed points are read on every curve but P-224 (P-224's
+  square root would need Tonelli-Shanks). TLS 1.3 sends only uncompressed
+  points; krb5's SPAKE sends compressed ones.
 - Secrets are not wiped from memory.
 - `entropy` needs `getentropy` (macOS, Linux, BSDs), so it does not work on
   Windows. It opens the C library at startup (`extern "c"`, mapped to
@@ -550,7 +678,7 @@ generation takes about 0.27 s on average (ten runs, in constant time).
 ## Tests
 
 ```bash
-python3 scripts/run_tests.py            # every test at -O0, -O2 and --debug, plus the examples
+python3 scripts/run_tests.py            # every test at -O0, -O2 and --debug, plus examples/
 python3 scripts/run_tests.py --native   # also built with the C compiler
 python3 scripts/ct_audit.py             # BigInt only on public values (run_tests.py runs it)
 python3 scripts/ct_timing.py [scale]    # timing tests of the constant-time code (about 10 s)
@@ -558,6 +686,8 @@ python3 scripts/wycheproof.py [file ...]   # Wycheproof's vectors (../wycheproof
 python3 scripts/dudect.py [--seconds S]    # dudect's own harness on the constant-time code (x86, ../dudect.git)
 python3 scripts/gen_vectors.py          # regenerate test/vectors from Python's integers
 scripts/gen_rsa8192.sh                  # regenerate test/vectors/rsa8192.txt with openssl
+python3 scripts/brainpool_vectors.py    # regenerate test/vectors/brainpool.txt (a venv with ecdsa and cryptography checks more)
+python3 scripts/ed448_vectors.py        # regenerate test/vectors/x448.txt and ed448.txt, checked with openssl
 tools/govectors.sh -check test/vectors/xcrypto.txt   # xcrypto.txt against Go's x/crypto (needs Go)
 tools/govectors.sh > test/vectors/xcrypto.txt   # regenerate it
 ```
@@ -576,15 +706,19 @@ tools/govectors.sh > test/vectors/xcrypto.txt   # regenerate it
   t-test compares their times, whole and cut at percentiles; |t| above 10
   is a leak. It covers `mont_modexp` (exponent 0 against random),
   `ct_mod_inv`, `ct_mod_small`, the RSA private operation, RSA key loading,
-  X25519, ECDSA on P-256 and Ed25519 signing. BigInt's `modpow` runs as a
+  X25519, ECDSA on P-256, Ed25519 signing, Camellia (one block or random
+  under a key; one key or random through the key schedule) and CMAC over
+  Camellia (one key or random). BigInt's `modpow` runs as a
   control and must be caught (it is, at |t| near 500; the others stay
   below 2).
 - `wycheproof/wycheproof` (`scripts/wycheproof.py`, not in run_tests.py):
   Wycheproof's vectors, converted from its JSON, for every family this
   package has an API for: AES-GCM, ChaCha20- and XChaCha20-Poly1305,
-  AES-CBC with PKCS #7, AES-XTS, HMAC, HKDF and PBKDF2 over SHA-1, SHA-2
-  and SHA-3, ECDH and ECDSA (DER and P1363) on P-224 to P-521, Ed25519,
-  X25519, RSA PKCS #1 v1.5 (signing, verifying, decryption), PSS and OAEP,
+  AES- and Camellia-CBC with PKCS #7, AES- and Camellia-CMAC, AES-XTS, HMAC, HKDF and PBKDF2 over SHA-1, SHA-2
+  and SHA-3, ECDH and ECDSA (DER and P1363) on P-224 to P-521 and
+  brainpoolP256r1, P384r1 and P512r1 (their ECDH public keys as
+  SubjectPublicKeyInfo, parsed strictly by the script), Ed25519,
+  X25519, Ed448, X448, RSA PKCS #1 v1.5 (signing, verifying, decryption), PSS and OAEP,
   DSA, ML-KEM, ML-DSA and primality. A valid test must give Wycheproof's
   output, an invalid one must be refused. What is not tried is listed with
   its reason: curves and hashes this package does not have, PSS and OAEP
@@ -595,7 +729,7 @@ tools/govectors.sh > test/vectors/xcrypto.txt   # regenerate it
   constant-time code exported to C, in its own harness
   (`tools/dudect/harness.c`): mont_modexp, ct_mod_inv, ct_mod_small, the
   RSA private and constant-time public operations, X25519, ECDSA P-256 and
-  Ed25519 signing. Two controls must leak (an early-exit comparison, BigInt's
+  Ed25519 signing, Camellia (a block, a key schedule) and Camellia-CMAC. Two controls must leak (an early-exit comparison, BigInt's
   modpow) and a third, constant time by construction, sets the machine's
   floor: a leak is t above 500, or above 10 with ten times that floor's
   effect size.
@@ -605,12 +739,40 @@ tools/govectors.sh > test/vectors/xcrypto.txt   # regenerate it
   and the §6.1 key agreement.
 - `x25519_vectors`: random scalars and u-coordinates against a Python
   transcription of RFC 7748.
+- `x448_field`: GF(2^448 − 2^224 − 1) arithmetic against `BigInt`,
+  including non-canonical encodings and limbs at the carried bound of
+  either sign, where --debug's overflow checks see the largest products.
+- `x448_rfc`: RFC 7748's X448 vectors (§5.2, with the 1,000-iteration
+  chain) and the §6.2 key agreement. The 1,000,000-iteration chain, too
+  long for the runner, gave the RFC's result in a native build (in about
+  400 s).
+- `x448_vectors`: random scalars (some from openssl genpkey) and
+  u-coordinates, at and above p among them, from
+  `scripts/ed448_vectors.py`'s transcription of RFC 7748 and remade by
+  openssl; low-order points refused by `x448_shared`.
+- `ed448_vectors`: all of RFC 8032's Ed448 and Ed448ph vectors (§7.4 and
+  §7.5), then random seeds, messages and contexts, matching the
+  transcription and openssl byte for byte. Changed messages, contexts,
+  signatures and keys are rejected, as are an Ed448 signature taken as
+  Ed448ph and the reverse, S ≥ L, non-canonical, off-curve and "−0" points,
+  and wrong lengths.
 - `mont_ops`: Montgomery multiply, exponentiation, R², reduction,
   products and `ct_mod_inv` (invertible or not) against `BigInt`.
 - `sha256_vectors`: every length up to 129 bytes and longer ones, one-shot
   and in pieces, against hashlib; MGF1.
 - `aes_vectors`: the S-box and its inverse on all 256 bytes, blocks at each
   key size, and CTR with counters that carry and wrap.
+- `camellia_vectors` (`scripts/camellia_vectors.py`): s1 computed as
+  camellia.goose computes it (A1, the AES circuit, A2, on planes) against
+  RFC 3713's SBOX1 on all 256 bytes; F on random and edge inputs; RFC
+  3713's Appendix A, every one-bit plaintext under the zero key (MIT's
+  known-answer set, which agrees) and every one-bit key, and random blocks
+  at each key size (all-zero and all-one keys among them), both ways; CBC, CFB, OFB and CTR (counters
+  that wrap) through `bignum.modes`; CMAC over AES, Camellia and 3DES at
+  every length around the block edges, RFC 4493's examples, and keys
+  chosen so that both arms of the subkey doubling run, with altered,
+  truncated, too-long and empty tags. Every vector is checked against
+  openssl when made.
 - `gcm_vectors`: the GCM specification's test cases 1 to 5 and random ones,
   with nonces of 12 bytes and other lengths. Every vector is also opened
   with each part tampered with in turn.
@@ -639,6 +801,16 @@ tools/govectors.sh > test/vectors/xcrypto.txt   # regenerate it
   reproduced byte for byte (directly and through external mu), hedged
   signatures, and changed ones that must fail, malformed hint encodings
   among them. Go's crypto/mldsa agrees with every line.
+- `slhdsa_vectors`: SLH-DSA, all twelve sets (`scripts/slhdsa_vectors.py`):
+  openssl's keys from seeds and its deterministic signatures under empty,
+  short and 255-byte contexts, with changed and wrong-length ones it
+  refuses; and NIST ACVP's keys and signatures: HashSLH-DSA under each of
+  the twelve pre-hashes, the internal interface, hedged signing with given
+  randomness. The "f" sets are signed here three times (byte for byte),
+  SHA2-128s and SHAKE-128s once, and the other "s" sets' signatures, which
+  take seconds to make, are verified. Then hedged signing, a key check,
+  and refusals: another context, message, pre-hash or set, a context past
+  255 bytes, wrong lengths. About 15 s at -O2 and 45 s with --debug.
 - `hpke_vectors`: RFC 9180's test vectors in all four modes (DHKEM over
   P-256, P-521 and X25519; HKDF-SHA256 and -SHA512; every AEAD and
   export-only) and Go's post-quantum ones (ML-KEM-512/768/1024, the three
@@ -662,6 +834,8 @@ tools/govectors.sh > test/vectors/xcrypto.txt   # regenerate it
   and XTEA blocks and CBC, and AES-XTS; RC2-CBC at 40, 64 and 128
   effective bits from openssl; RFC 2268's RC2 and RFC 2144's CAST-128
   vectors.
+- `kmac_vectors`: KMAC128 and KMAC256 against NIST SP 800-185's samples
+  1 to 6, and lengths the samples lack, from openssl.
 - `ec_vectors`: P-256, P-384 and P-521 multiples of the generator (1, 2, n − 2,
   n − 1 and random ones), ECDH, and ECDSA matching RFC 6979 byte for byte.
   Signatures also go through DER and back. Off-curve points, bad
@@ -674,6 +848,14 @@ tools/govectors.sh > test/vectors/xcrypto.txt   # regenerate it
   signatures and ciphertexts under the wrong key.
 - `ec_vectors` also reads `ec224.txt`: P-224 the same way, with RFC 6979's
   P-224 signature.
+- `brainpool_vectors`: brainpoolP256r1, P384r1 and P512r1 against
+  `brainpool.txt` (`scripts/brainpool_vectors.py`): the ECDH examples of
+  RFC 7027 and RFC 6932, multiples of the generator, compressed points,
+  ECDH and RFC 6979 signatures, all cross-checked against openssl, the
+  `ecdsa` package (signatures byte for byte) and `cryptography`, and
+  signatures made by openssl and `cryptography` to verify. Bad points,
+  points of P-256 and P-384, and out-of-range scalars are refused, and
+  the general-a addition run on P-256 and P-384 matches theirs.
 - `modes_vectors`: CBC, CFB, OFB and CTR over AES (each key size), DES and
   triple DES, at lengths around the block, each way. Also single DES and
   triple-DES blocks (with the textbook vector), MD5 and HMAC-MD5, RC4 with
@@ -701,7 +883,9 @@ AES, GCM, ChaCha20-Poly1305, RSA, EC and Ed25519 vectors (hashes, HMAC and HKDF 
 hashlib). Each transcription is first checked against its standard's
 published vectors. Then, while generating, every AES, CTR, ChaCha20,
 Poly1305, RSA, ECDH, ECDSA and Ed25519 vector is also checked with the `openssl` command when
-it is installed. `scripts/extra_vectors.py` does the same for everything
+it is installed. `scripts/camellia_vectors.py` (which needs openssl)
+holds the Camellia and CMAC transcriptions. `scripts/extra_vectors.py`
+does the same for everything
 added later (with `des_ref.py`, a DES transcription). It checks cSHAKE's
 transcription through openssl's KMAC, which is built on it. Its Argon2
 cases and openssl's own PKCS #1 v1.5 ciphertexts come from openssl
@@ -712,15 +896,43 @@ then `../goose.git/build/goose`.
 
 ## Examples
 
-- `examples/pi_digits.goose`: digits of π by Machin's formula.
-- `examples/factorial.goose`: n! two ways, direct and by prime powers with
+In `examples/`, run from the repository's top as `goose examples/<name>.goose`
+(or from that folder).
+
+- `pi_digits.goose`: digits of π by Machin's formula.
+- `factorial.goose`: n! two ways, direct and by prime powers with
   binary splitting.
-- `examples/x25519_demo.goose`: a key exchange.
-- `examples/rsa_demo.goose`: key generation, signatures and OAEP, timed.
-- `examples/aes_gcm_demo.goose`: sealing, opening and tamper detection, and throughput.
-- `examples/ecc_demo.goose`: ECDHE and ECDSA on P-256 and P-384, Ed25519,
+- `bigint_basics.goose`: BigInt parsing and bases, arithmetic, truncating and floor division,
+  gcd, modinv and modpow, bits and bytes.
+- `random_bytes.goose`: the OS's random bytes for keys and nonces, a token, a number below a bound.
+- `hashes.goose`: SHA-2, SHA-3, SHAKE and cSHAKE, BLAKE2, and the legacy hashes.
+- `mac.goose`: HMAC, CMAC and Poly1305, tags checked in constant time.
+- `derive_keys.goose`: HKDF, PBKDF2 and scrypt.
+- `password_hash.goose`: storing and checking passwords with Argon2id and bcrypt; bcrypt_pbkdf.
+- `aes_gcm_demo.goose`: sealing, opening and tamper detection, and throughput.
+- `chacha20_poly1305.goose`: ChaCha20-Poly1305 records, XChaCha20-Poly1305, bare ChaCha20.
+- `block_modes.goose`: CBC with padding, CTR, CFB, OFB and XTS.
+- `key_wrap.goose`: AES key wrap, plain and padded, and envelope encryption.
+- `legacy_ciphers.goose`: 3DES, DES, Blowfish, CAST5, Twofish, XTEA, RC2, RC4, Salsa20.
+- `x25519_demo.goose`: a key exchange.
+- `x448_ed448.goose`: an X448 key exchange, and Ed448 signatures with a
+  context and Ed448ph, timed.
+- `rsa_demo.goose`: key generation, signatures and OAEP, timed.
+- `ecc_demo.goose`: ECDHE and ECDSA on P-256 and P-384, Ed25519,
   and HKDF, timed.
-- `examples/speed.goose`: every primitive's throughput or rate, one line
+- `brainpool.goose`: RFC 7027's ECDH example, then ECDH, ECDSA and
+  compressed points on the three Brainpool curves, timed beside P-256.
+- `dsa_demo.goose`: DSA parameters, keys, random and RFC 6979 signatures.
+- `ffdh_demo.goose`: finite-field Diffie-Hellman over MODP group 14, bad peer values refused.
+- `mlkem_demo.goose`: ML-KEM-768 encapsulation and decapsulation.
+- `mldsa_demo.goose`: ML-DSA-65 signatures, with contexts and external mu.
+- `slhdsa_demo.goose`: SLH-DSA-SHAKE-128f signatures, hedged and
+  deterministic, with a context and HashSLH-DSA, timed; the sizes of all
+  twelve sets.
+- `hpke_demo.goose`: HPKE base and auth modes, export, and X-Wing.
+- `nacl_demo.goose`: NaCl secretbox, box, sealed boxes, sign and auth.
+- `constant_time.goose`: the `ct` masks, select, swap and compare, Montgomery modexp and inverse.
+- `speed.goose`: every primitive's throughput or rate, one line
   each; `scripts/speed_vs_openssl.py` sets it against openssl.
-- `examples/bench.goose`: schoolbook vs Karatsuba by size, 10000!, 2048-bit
+- `bench.goose`: schoolbook vs Karatsuba by size, 10000!, 2048-bit
   modpow.

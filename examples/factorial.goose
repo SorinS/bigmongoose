@@ -13,12 +13,12 @@ import bignum from "..";
 // resizable), so a level is one limb array and where each number starts.
 fn product(xs: const u32[:]) -> bignum::BigInt {
     var acc = bignum::zero();
-    var level: u32[>..] = [];
+    var level:  u32[>..] = [];
     var starts: i64[>..] = [];
     for x in xs { starts.push(level.len); level.push(x); }
     starts.push(level.len);
     while starts.len > 2 {
-        var next: u32[>..] = [];
+        var next:    u32[>..] = [];
         var nstarts: i64[>..] = [];
         var i = 0;
         while i + 1 < starts.len {

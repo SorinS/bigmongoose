@@ -15,7 +15,7 @@ fn hex(b: const u8[:]) -> u8[>..] {
 }
 
 fn main() {
-    var key: u8[32] = [0; 32];
+    var key:   u8[32] = [0; 32];
     var nonce: u8[12] = [0; 12];
     bignum::random_bytes(key);
     bignum::random_bytes(nonce);                         // never reuse one under a key
