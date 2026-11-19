@@ -3,6 +3,7 @@
 // must not verify or decrypt under another key.
 import std;
 import bignum from "..";
+import entropy from "SorinS/entropygoose@v0.7.0";
 import bignum.rsa;
 
 var failures = 0;

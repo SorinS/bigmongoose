@@ -6,6 +6,7 @@
 import std;
 import os;
 import bignum from "..";
+import entropy from "SorinS/entropygoose@v0.7.0";
 
 // The product of xs by binary splitting, so the multiplies are balanced
 // and the large ones go through Karatsuba. Bottom-up: neighbours pair

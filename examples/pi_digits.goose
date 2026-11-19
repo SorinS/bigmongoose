@@ -7,6 +7,7 @@
 import std;
 import os;
 import bignum from "..";
+import entropy from "SorinS/entropygoose@v0.7.0";
 
 // atan(1/x) * scale
 fn atan_inv(x: u32, scale) -> bignum::BigInt {

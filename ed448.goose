@@ -195,7 +195,7 @@ fn ed448_public(seed: const u8[:]) -> u8[57] {
 // A fresh key pair from the OS's entropy: private seed, public key.
 fn ed448_keypair() -> u8[57], u8[57] {
     var seed: u8[57] = [0; 57];
-    random_bytes(seed);
+    entropy::random_bytes(seed);
     return seed, ed448_public(seed);
 }
 

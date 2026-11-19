@@ -2,6 +2,7 @@
 // scripts/gen_vectors.py from Python's integers) against bignum.
 import std;
 import bignum from "..";
+import entropy from "SorinS/entropygoose@v0.7.0";
 
 var failures = 0;
 var cases = 0;

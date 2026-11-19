@@ -3,6 +3,7 @@
 // and all-ones ones, with exponents of several widths, zero among them.
 import std;
 import bignum from "..";
+import entropy from "SorinS/entropygoose@v0.7.0";
 import bignum.mont;
 
 var failures = 0;

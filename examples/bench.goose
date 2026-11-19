@@ -5,6 +5,7 @@
 import std;
 import os;
 import bignum from "..";
+import entropy from "SorinS/entropygoose@v0.7.0";
 
 fn random_limbs(r: rng&, n: i64) -> u32[>..] {
     var out: u32[>..] = [];

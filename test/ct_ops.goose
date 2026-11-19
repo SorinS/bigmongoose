@@ -2,6 +2,7 @@
 // at the edges of a width (0, 1, m - 1, all ones).
 import std;
 import bignum from "..";
+import entropy from "SorinS/entropygoose@v0.7.0";
 import bignum.ct;
 
 var failures = 0;

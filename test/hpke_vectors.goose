@@ -9,6 +9,7 @@
 // info or PSK, inconsistent modes.
 import std;
 import bignum from "..";
+import entropy from "SorinS/entropygoose@v0.7.0";
 import bignum.hpke;
 
 var failures = 0;

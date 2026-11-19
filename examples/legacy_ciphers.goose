@@ -8,6 +8,7 @@
 import std;
 import os;
 import bignum from "..";
+import entropy from "SorinS/entropygoose@v0.7.0";
 import bignum.modes;
 import bignum.des;
 import bignum.blowfish;

@@ -36,6 +36,9 @@ PUBLIC = {
     ("dsa", "dsa_verify"): "verification sees public values only",
     ("ec", "ec_hex"): "curve constants",
     ("ffdh", "ffdh_value_ok"): "the peer's public value and p",
+    ("shamir", "prime_field_ok"): "the prime field's size is public (KMIP's Prime Field Size)",
+    ("shamir", "split_prime_with"): "the prime and the number of parts",
+    ("shamir", "join_prime"): "the prime and the parts' numbers",
 }
 
 FN = re.compile(r"^\s*(?:(?:recursive|inline|simd|checkfree|export)\s+)*fn\s+(\w+)")
@@ -51,7 +54,7 @@ def strip(line):
 def bigint_api():
     names = set()
     # The library's main module sits beside its directory, at gslib's root.
-    for line in open(os.path.join(ROOT, "bignum.goose")):
+    for line in open(os.path.join(ROOT, "bignum.goose"), encoding="utf-8"):
         m = FN.match(line)
         if m:
             names.add(m.group(1))
@@ -62,7 +65,7 @@ def uses(path, api):
     """{function: {BigInt function it calls}} for one module."""
     found = {}
     fn = None
-    for line in open(path):
+    for line in open(path, encoding="utf-8"):
         code = strip(line)
         m = FN.match(code)
         if m:

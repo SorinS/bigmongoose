@@ -5,6 +5,7 @@
 import std;
 import os;
 import bignum from "..";
+import entropy from "SorinS/entropygoose@v0.7.0";
 import bignum.rsa;
 
 fn hex(b: const u8[:]) -> u8[>..] {

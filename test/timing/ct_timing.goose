@@ -18,6 +18,7 @@ import std;
 import os;
 import math;
 import bignum from "../..";
+import entropy from "SorinS/entropygoose@v0.7.0";
 import bignum.ct;
 import bignum.mont;
 import bignum.rsa;

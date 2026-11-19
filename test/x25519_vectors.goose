@@ -3,6 +3,7 @@
 // include non-canonical encodings (>= p, top bit set).
 import std;
 import bignum from "..";
+import entropy from "SorinS/entropygoose@v0.7.0";
 import bignum.x25519;
 
 fn unhex(s: const u8[:]) -> u8[32] {

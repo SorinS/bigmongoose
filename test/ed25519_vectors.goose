@@ -5,6 +5,7 @@
 // not.
 import std;
 import bignum from "..";
+import entropy from "SorinS/entropygoose@v0.7.0";
 import bignum.ed25519;
 
 var failures = 0;

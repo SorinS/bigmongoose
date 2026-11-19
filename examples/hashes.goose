@@ -7,6 +7,7 @@
 import std;
 import os;
 import bignum from "..";
+import entropy from "SorinS/entropygoose@v0.7.0";
 import bignum.sha256;
 import bignum.sha512;
 import bignum.sha3;

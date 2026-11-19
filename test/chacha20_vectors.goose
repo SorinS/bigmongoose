@@ -5,6 +5,7 @@
 // opened with each part tampered with in turn.
 import std;
 import bignum from "..";
+import entropy from "SorinS/entropygoose@v0.7.0";
 import bignum.chacha20;
 
 var failures = 0;

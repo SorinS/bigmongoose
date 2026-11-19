@@ -4,6 +4,7 @@
 // bases; then the range check, and keys made here agreeing.
 import std;
 import bignum from "..";
+import entropy from "SorinS/entropygoose@v0.7.0";
 import bignum.ffdh;
 
 var failures = 0;

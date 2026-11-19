@@ -6,6 +6,7 @@
 import std;
 import os;
 import bignum from "..";
+import entropy from "SorinS/entropygoose@v0.7.0";
 import bignum.x25519;
 import bignum.ct;
 

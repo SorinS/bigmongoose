@@ -9,6 +9,7 @@
 // (vectors/rsa8192.txt): openssl's signatures and ciphertext.
 import std;
 import bignum from "..";
+import entropy from "SorinS/entropygoose@v0.7.0";
 import bignum.rsa;
 
 var failures = 0;

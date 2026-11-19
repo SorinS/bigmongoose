@@ -7,9 +7,9 @@
 import std;
 import os;
 import bignum from "..";
+import entropy from "SorinS/entropygoose@v0.7.0";
 import bignum.keywrap;
 import bignum.gcm;
-import bignum.entropy;
 
 fn hex(b: const u8[:]) -> u8[>..] {
     var out: u8[>..] = [];
@@ -41,11 +41,11 @@ fn main() {
     // Envelope encryption: a fresh data key encrypts the data, and only
     // the wrapped data key is stored beside it.
     var kek: u8[32] = [0; 32];
-    bignum::random_bytes(kek);
+    entropy::random_bytes(kek);
     var dek: u8[32] = [0; 32];
-    bignum::random_bytes(dek);
+    entropy::random_bytes(dek);
     var nonce: u8[12] = [0; 12];
-    bignum::random_bytes(nonce);
+    entropy::random_bytes(nonce);
     let sealed = bignum::aes_gcm_seal(dek, nonce, "", "customer record #1001");
     let wrapped, okw = bignum::aes_key_wrap(kek, dek);
     guard okw && wrapped.len == 40 else { print("key_wrap: wrap failed"); exit(1); }
@@ -60,7 +60,7 @@ fn main() {
 
     // A wrong KEK and a changed byte both fail, alike and in the same time.
     var other: u8[32] = [0; 32];
-    bignum::random_bytes(other);
+    entropy::random_bytes(other);
     let k1, bad1 = bignum::aes_key_unwrap(other, wrapped);
     var changed = copy(wrapped);
     changed[20] ^= 0x80;

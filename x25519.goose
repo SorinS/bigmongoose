@@ -255,7 +255,7 @@ fn x25519_base(scalar: const u8[:]) -> u8[32] {
 // A fresh key pair from the OS's entropy: private, public.
 fn x25519_keypair() -> u8[32], u8[32] {
     var sk: u8[32] = [0; 32];
-    random_bytes(sk);
+    entropy::random_bytes(sk);
     return sk, x25519_base(sk);
 }
 

@@ -4,8 +4,8 @@
 // which must fail and give nothing back.
 import std;
 import bignum from "..";
+import entropy from "SorinS/entropygoose@v0.7.0";
 import bignum.keywrap;
-import bignum.entropy;
 
 var failures = 0;
 var checks = 0;
@@ -102,11 +102,11 @@ fn main() {
     for kl in [16, 24, 32] {
         var kek: u8[>..] = [];
         kek.resize(kl, 0);
-        bignum::random_bytes(kek);
+        entropy::random_bytes(kek);
         for n in 1..65 {
             var key: u8[>..] = [];
             key.resize(n, 0);
-            bignum::random_bytes(key);
+            entropy::random_bytes(key);
             let wp, okp = bignum::aes_key_wrap_pad(kek, key);
             check(str("KWP wrap ", kl, "/", n), okp && wp.len == (n + 7) / 8 * 8 + 8);
             let bp, okb = bignum::aes_key_unwrap_pad(kek, wp);

@@ -7,9 +7,9 @@
 import std;
 import os;
 import bignum from "..";
+import entropy from "SorinS/entropygoose@v0.7.0";
 import bignum.hmac;
 import bignum.kdf;
-import bignum.entropy;
 
 fn hex(b: const u8[:]) -> u8[>..] {
     var out: u8[>..] = [];
@@ -41,9 +41,9 @@ fn main() {
     // Extract once, then expand with a different label for each key, so
     // the client and server keys are independent of each other.
     var secret: u8[32] = [0; 32];
-    bignum::random_bytes(secret);
+    entropy::random_bytes(secret);
     var salt: u8[16] = [0; 16];
-    bignum::random_bytes(salt);
+    entropy::random_bytes(salt);
     let prk = bignum::hkdf_extract(256, salt, secret);
     let client_key = bignum::hkdf_expand(256, prk, "example v1 client key", 32);
     let server_key = bignum::hkdf_expand(256, prk, "example v1 server key", 32);

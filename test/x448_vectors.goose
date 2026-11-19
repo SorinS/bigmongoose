@@ -5,6 +5,7 @@
 // all-zero secret x448_shared reports, and fresh key pairs.
 import std;
 import bignum from "..";
+import entropy from "SorinS/entropygoose@v0.7.0";
 import bignum.x448;
 
 fn unhex(s: const u8[:]) -> u8[56] {

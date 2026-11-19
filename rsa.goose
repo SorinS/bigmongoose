@@ -280,7 +280,7 @@ fn small_primes() -> u32[>..] {
 fn random_bits_vartime(bits: i64) -> BigInt {
     var b: u8[>..] = [];
     b.resize((bits + 7) / 8, 0);
-    random_bytes(b);
+    entropy::random_bytes(b);
     let extra = 8 * b.len - bits;
     if extra > 0 { b[0] = b[0] & (255 >> extra) as! u8; }
     return from_bytes_be(b);
@@ -305,7 +305,7 @@ fn random_below(r: u32[:], m: const u32[:]) {
     var b: u8[>..] = [];
     b.resize(4 * m.len, 0);
     loop {
-        random_bytes(b);
+        entropy::random_bytes(b);
         limbs_from_be(r, b);
         if top < 32 { r[m.len - 1] = r[m.len - 1] & ((1 << top) - 1) as! u32; }
         if (ct_lt(r, m) & (ct_is_zero(r) ^ 1)) == 1 { return; }
@@ -394,7 +394,7 @@ fn rsa_random_prime(limbs: i64, e: const u32[:], primes: const u32[:]) -> u32[>.
     var t = zero_limbs(1);
     var inv = zero_limbs(1);
     loop {
-        random_bytes(b);
+        entropy::random_bytes(b);
         limbs_from_be(p, b);
         p[limbs - 1] = p[limbs - 1] | 0xc0000000;
         p[0] = p[0] | 3;
@@ -773,7 +773,7 @@ fn rsa_sign_pss(key: const RsaPrivateKey&, msg: const u8[:], salt_len: i64 = -1,
         -> u8[>..], bool {
     var salt: u8[>..] = [];
     salt.resize(if salt_len < 0 { hash_len(hash) } else { salt_len }, 0);
-    random_bytes(salt);
+    entropy::random_bytes(salt);
     return rsa_sign_pss_with_salt(key, msg, salt, hash);
 }
 
@@ -781,7 +781,7 @@ fn rsa_sign_pss_digest(key: const RsaPrivateKey&, digest: const u8[:], salt_len:
         -> u8[>..], bool {
     var salt: u8[>..] = [];
     salt.resize(if salt_len < 0 { hash_len(hash) } else { salt_len }, 0);
-    random_bytes(salt);
+    entropy::random_bytes(salt);
     return rsa_sign_pss_digest_with_salt(key, digest, salt, hash);
 }
 
@@ -820,12 +820,15 @@ fn rsa_verify_pss_digest(key, digest: const u8[:], sig: const u8[:], salt_len: i
 
 // OAEP (RSAES-OAEP) with a hash and MGF1 over the same hash: SHA-256
 // unless `hash` names another bignum.hmac id, as Go's EncryptOAEP takes
-// one. A message takes at most rsa_oaep_max(key, hash) bytes, 2 hash
-// lengths and 2 less than the modulus.
+// one; `mgf`, when not 0, is MGF1's hash instead (Go's OAEPOptions.MGFHash,
+// which KMIP's Mask Generator Hashing Algorithm sets). A message takes at
+// most rsa_oaep_max(key, hash) bytes, 2 hash lengths and 2 less than the
+// modulus.
 fn rsa_oaep_max(key, hash: i64 = 256) -> i64 { rsa_size(key) - 2 * hash_len(hash) - 2 }
 
 fn rsa_encrypt_oaep_with_seed(key, msg: const u8[:], label: const u8[:], seed: const u8[:],
-                              hash: i64 = 256) -> u8[>..] {
+                              hash: i64 = 256, mgf: i64 = 0) -> u8[>..] {
+    let mh = if mgf != 0 { mgf } else { hash };
     let k = rsa_size(key);
     let hl = hash_len(hash);
     assert(msg.len <= k - 2 * hl - 2 && seed.len == hl);
@@ -839,25 +842,26 @@ fn rsa_encrypt_oaep_with_seed(key, msg: const u8[:], label: const u8[:], seed: c
     for i in msg.len { db[dblen - msg.len + i] = msg[i]; }
     let sd = em[1..hl + 1];
     for i in hl { sd[i] = seed[i]; }
-    mgf1(hash, db, sd);
-    mgf1(hash, sd, db);
+    mgf1(mh, db, sd);
+    mgf1(mh, sd, db);
     let c, ok = rsa_public_op_ct(key, em);
     assert(ok);
     return c;
 }
 
-fn rsa_encrypt_oaep(key, msg: const u8[:], label: const u8[:] = "", hash: i64 = 256) -> u8[>..] {
+fn rsa_encrypt_oaep(key, msg: const u8[:], label: const u8[:] = "", hash: i64 = 256, mgf: i64 = 0) -> u8[>..] {
     var seed: u8[>..] = [];
     seed.resize(hash_len(hash), 0);
-    random_bytes(seed);
-    return rsa_encrypt_oaep_with_seed(key, msg, label, seed, hash);
+    entropy::random_bytes(seed);
+    return rsa_encrypt_oaep_with_seed(key, msg, label, seed, hash, mgf);
 }
 
 // The message and true, or empty and false. Every check on the decoded
 // block is made in constant time and folded into one flag, so a failure
 // does not say which part was wrong (Manger's attack).
 fn rsa_decrypt_oaep(key: const RsaPrivateKey&, ct: const u8[:], label: const u8[:] = "",
-                    hash: i64 = 256) -> u8[>..], bool {
+                    hash: i64 = 256, mgf: i64 = 0) -> u8[>..], bool {
+    let mh = if mgf != 0 { mgf } else { hash };
     var out: u8[>..] = [];
     let k = rsa_size(key);
     let hl = hash_len(hash);
@@ -867,8 +871,8 @@ fn rsa_decrypt_oaep(key: const RsaPrivateKey&, ct: const u8[:], label: const u8[
     let dblen = k - hl - 1;
     let sd = em[1..hl + 1];
     let db = em[hl + 1..];
-    mgf1(hash, sd, db);
-    mgf1(hash, db, sd);
+    mgf1(mh, sd, db);
+    mgf1(mh, db, sd);
     let lhash = hash_bits(hash, label);
     var good = checked & ct_is_zero_u32(em[0]) & ct_eq_bytes(db[..hl], lhash);
     // Find the 0x01 after the zero padding, without branching on bytes.
@@ -899,12 +903,12 @@ fn rsa_encrypt_pkcs1(key, msg: const u8[:]) -> u8[>..] {
     em.resize(k, 0);
     em[1] = 2;
     let ps = em[2..k - msg.len - 1];
-    random_bytes(ps);
+    entropy::random_bytes(ps);
     // The padding bytes must not be zero: redraw any that are.
     var one: u8[1] = [0; 1];
     for i in ps.len {
         while ps[i] == 0 {
-            random_bytes(one);
+            entropy::random_bytes(one);
             ps[i] = one[0];
         }
     }

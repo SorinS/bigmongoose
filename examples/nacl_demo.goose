@@ -7,9 +7,9 @@
 import std;
 import os;
 import bignum from "..";
+import entropy from "SorinS/entropygoose@v0.7.0";
 import bignum.nacl;
 import bignum.ed25519;
-import bignum.entropy;
 
 fn hex(b: const u8[:]) -> u8[>..] {
     var out: u8[>..] = [];
@@ -23,9 +23,9 @@ fn main() {
     // secretbox: XSalsa20-Poly1305 under a 32-byte key; a random 24-byte
     // nonce is safe, and is sent with the box.
     var key: u8[32] = [0; 32];
-    bignum::random_bytes(key);
+    entropy::random_bytes(key);
     var nonce: u8[24] = [0; 24];
-    bignum::random_bytes(nonce);
+    entropy::random_bytes(nonce);
     let sb = bignum::secretbox_seal("meet at noon", nonce, key);
     let sp, sok = bignum::secretbox_open(sb, nonce, key);
     var sbad = copy(sb);
@@ -38,7 +38,7 @@ fn main() {
     // opens with his secret key and her public key.
     let alice_pk, alice_sk = bignum::box_keypair();
     let bob_pk, bob_sk = bignum::box_keypair();
-    bignum::random_bytes(nonce);
+    entropy::random_bytes(nonce);
     let bx = bignum::box_seal("from alice", nonce, bob_pk, alice_sk);
     let bp, bok = bignum::box_open(bx, nonce, alice_pk, bob_sk);
     let eve_pk, eve_sk = bignum::box_keypair();

@@ -6,6 +6,7 @@
 // largest products the code can form.
 import std;
 import bignum from "..";
+import entropy from "SorinS/entropygoose@v0.7.0";
 import bignum.x448;
 
 var failures = 0;

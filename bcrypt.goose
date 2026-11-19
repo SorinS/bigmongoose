@@ -107,7 +107,7 @@ fn bcrypt_hash_with(password: const u8[:], cost: i64, salt: const u8[:]) -> u8[>
 
 fn bcrypt_hash(password: const u8[:], cost: i64 = BCRYPT_DEFAULT_COST) -> u8[>..], bool {
     var salt: u8[16] = [0; 16];
-    random_bytes(salt);
+    entropy::random_bytes(salt);
     return bcrypt_hash_with(password, cost, salt);
 }
 

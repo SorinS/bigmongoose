@@ -75,7 +75,7 @@ fn ffdh_keygen(p: const u8[:], xlen: i64) -> u8[>..], u8[>..] {
     assert(xlen >= 28 && xlen <= p.len);
     var x: u8[>..] = [];
     x.resize(xlen, 0);
-    random_bytes(x);
+    entropy::random_bytes(x);
     x[0] |= 0x80;
     let two: u8[1] = [2];
     let pub = ffdh_modexp(two, x, p);

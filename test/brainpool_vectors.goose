@@ -9,6 +9,7 @@
 // general-a addition run on P-256 must give P-256's own results.
 import std;
 import bignum from "..";
+import entropy from "SorinS/entropygoose@v0.7.0";
 import bignum.ec;
 
 var failures = 0;

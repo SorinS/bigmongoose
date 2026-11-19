@@ -8,10 +8,10 @@
 import std;
 import os;
 import bignum from "..";
+import entropy from "SorinS/entropygoose@v0.7.0";
 import bignum.argon2;
 import bignum.bcrypt;
 import bignum.ct;
-import bignum.entropy;
 
 fn hex(b: const u8[:]) -> u8[>..] {
     var out: u8[>..] = [];
@@ -26,7 +26,7 @@ struct Stored { salt: u8[16], hash: u8[>..] }
 // t = 1, m = 2 GiB, or t = 3, m = 64 MiB where memory is short.
 fn enroll(password: const u8[:]) -> Stored {
     var s = Stored { salt: [0; 16], hash: [] };
-    bignum::random_bytes(s.salt);
+    entropy::random_bytes(s.salt);
     s.hash = bignum::argon2id_key(password, s.salt, 1, 8 * 1024, 1, 32);
     return s;
 }

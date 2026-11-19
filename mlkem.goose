@@ -337,7 +337,7 @@ fn mlkem_keys_from_seed(k: i64, seed: const u8[:]) -> u8[>..], u8[>..] {
 fn mlkem_keygen(k: i64) -> u8[>..], u8[>..] {
     var seed: u8[>..] = [];
     seed.resize(64, 0);
-    random_bytes(seed);
+    entropy::random_bytes(seed);
     let ek, dk = mlkem_keys_from_seed(k, seed);
     return seed, ek;
 }
@@ -370,7 +370,7 @@ fn mlkem_encaps_with(k: i64, ek: const u8[:], m: const u8[:]) -> u8[>..], u8[>..
 
 fn mlkem_encaps(k: i64, ek: const u8[:]) -> u8[>..], u8[>..], bool {
     var m: u8[32] = [0; 32];
-    random_bytes(m);
+    entropy::random_bytes(m);
     return mlkem_encaps_with(k, ek, m);
 }
 

@@ -9,6 +9,7 @@
 
 import std;
 import bignum from "../..";
+import entropy from "SorinS/entropygoose@v0.7.0";
 import bignum.mont;
 import bignum.rsa;
 import bignum.x25519;
