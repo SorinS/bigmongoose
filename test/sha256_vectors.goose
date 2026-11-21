@@ -3,7 +3,7 @@
 // uneven pieces, and MGF1 against RFC 8017's definition.
 import std;
 import bignum from "..";
-import entropy from "SorinS/entropygoose@v0.7.0";
+import entropy from "SorinS/entropygoose@v0.9.1";
 import bignum.sha256;
 
 fn unhex(s: const u8[:]) -> u8[>..] {

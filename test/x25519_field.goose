@@ -3,7 +3,7 @@
 // through each operation and through the ladder's add/sub-then-multiply.
 import std;
 import bignum from "..";
-import entropy from "SorinS/entropygoose@v0.7.0";
+import entropy from "SorinS/entropygoose@v0.9.1";
 import bignum.x25519;
 
 var failures = 0;

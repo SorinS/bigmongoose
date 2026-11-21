@@ -7,7 +7,7 @@
 // that crosses segment and address-block boundaries.
 import std;
 import bignum from "..";
-import entropy from "SorinS/entropygoose@v0.7.0";
+import entropy from "SorinS/entropygoose@v0.9.1";
 import bignum.blake2;
 import bignum.kdf;
 import bignum.argon2;

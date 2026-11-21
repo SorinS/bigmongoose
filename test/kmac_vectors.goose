@@ -4,7 +4,7 @@
 // openssl's KMAC; then a tag of one length is not a prefix of another's.
 import std;
 import bignum from "..";
-import entropy from "SorinS/entropygoose@v0.7.0";
+import entropy from "SorinS/entropygoose@v0.9.1";
 import bignum.kmac;
 
 var failures = 0;

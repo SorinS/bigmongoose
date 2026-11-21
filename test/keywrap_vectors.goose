@@ -4,7 +4,7 @@
 // which must fail and give nothing back.
 import std;
 import bignum from "..";
-import entropy from "SorinS/entropygoose@v0.7.0";
+import entropy from "SorinS/entropygoose@v0.9.1";
 import bignum.keywrap;
 
 var failures = 0;

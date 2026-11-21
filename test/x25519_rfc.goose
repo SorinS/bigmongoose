@@ -2,7 +2,7 @@
 // iteration chain) and §6.1 (Alice and Bob's key agreement).
 import std;
 import bignum from "..";
-import entropy from "SorinS/entropygoose@v0.7.0";
+import entropy from "SorinS/entropygoose@v0.9.1";
 import bignum.x25519;
 
 fn unhex(s: const u8[:]) -> u8[32] {

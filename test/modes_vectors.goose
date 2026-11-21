@@ -6,7 +6,7 @@
 // RC4 with keys of 1 to 256 bytes. Then PKCS #7 padding, good and bad.
 import std;
 import bignum from "..";
-import entropy from "SorinS/entropygoose@v0.7.0";
+import entropy from "SorinS/entropygoose@v0.9.1";
 import bignum.modes;
 import bignum.hmac;
 import bignum.rc4;

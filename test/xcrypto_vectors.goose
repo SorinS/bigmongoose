@@ -9,7 +9,7 @@
 // vectors and RFC 2144's CAST-128 one.
 import std;
 import bignum from "..";
-import entropy from "SorinS/entropygoose@v0.7.0";
+import entropy from "SorinS/entropygoose@v0.9.1";
 import bignum.md4;
 import bignum.ripemd160;
 import bignum.salsa20;

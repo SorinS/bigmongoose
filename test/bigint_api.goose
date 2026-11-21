@@ -2,7 +2,7 @@
 // too), bytes, parse errors, and the identities between operations.
 import std;
 import bignum from "..";
-import entropy from "SorinS/entropygoose@v0.7.0";
+import entropy from "SorinS/entropygoose@v0.9.1";
 
 fn eqs(a, s: const u8[:]) -> bool { bignum::to_str(a) == s }
 

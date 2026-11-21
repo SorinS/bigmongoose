@@ -6,7 +6,7 @@
 // decrypted by openssl, with malformed padding refused.
 import std;
 import bignum from "..";
-import entropy from "SorinS/entropygoose@v0.7.0";
+import entropy from "SorinS/entropygoose@v0.9.1";
 import bignum.chacha20;
 import bignum.sha3;
 import bignum.sha512;

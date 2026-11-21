@@ -7,7 +7,7 @@
 // off-curve points, x = 0 with the sign bit set, or wrong lengths.
 import std;
 import bignum from "..";
-import entropy from "SorinS/entropygoose@v0.7.0";
+import entropy from "SorinS/entropygoose@v0.9.1";
 import bignum.ed448;
 
 var failures = 0;

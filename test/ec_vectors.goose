@@ -6,7 +6,7 @@
 // or not encoded right, and scalars out of range.
 import std;
 import bignum from "..";
-import entropy from "SorinS/entropygoose@v0.7.0";
+import entropy from "SorinS/entropygoose@v0.9.1";
 import bignum.ec;
 
 var failures = 0;

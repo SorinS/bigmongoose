@@ -6,7 +6,7 @@
 // SHAKE at lengths around every block and rate, and HMAC over them.
 import std;
 import bignum from "..";
-import entropy from "SorinS/entropygoose@v0.7.0";
+import entropy from "SorinS/entropygoose@v0.9.1";
 import bignum.hmac;
 import bignum.sha1;
 import bignum.sha3;
