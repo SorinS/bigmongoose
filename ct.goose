@@ -133,6 +133,7 @@ fn ct_mod_add(r: u32[:], a: const u32[:], b: const u32[:], m: const u32[:]) {
 
 // r = (a - b) mod m, for a, b < m, all of one width.
 fn ct_mod_sub(r: u32[:], a: const u32[:], b: const u32[:], m: const u32[:]) {
+    assert(m.len == r.len);
     let borrow = ct_sub(r, a, b);
     // Add m back when the subtraction went below zero.
     let mask = ct_mask(borrow);

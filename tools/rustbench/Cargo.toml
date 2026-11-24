@@ -1,0 +1,53 @@
+[package]
+name = "rustbench"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# The RustCrypto crates (and dalek for 25519) on the operations of
+# examples/speed.goose; scripts/speed_vs_rust.py builds and runs it.
+[dependencies]
+md-5 = "0.10"
+sha1 = "0.10"
+sha2 = "0.10"
+sha3 = "0.10"
+blake2 = "0.10"
+hmac = "0.12"
+aes = "0.8"
+aes-gcm = "0.10"
+chacha20 = "0.9"
+chacha20poly1305 = "0.10"
+ctr = "0.9"
+cbc = "0.1"
+cfb-mode = "0.8"
+ofb = "0.6"
+des = "0.8"
+rc4 = "0.1"
+x25519-dalek = { version = "2", features = ["static_secrets"] }
+ed25519-dalek = "2"
+p224 = { version = "0.13", features = ["ecdsa", "ecdh"] }
+p256 = { version = "0.13", features = ["ecdsa", "ecdh"] }
+p384 = { version = "0.13", features = ["ecdsa", "ecdh"] }
+p521 = { version = "0.13", features = ["ecdsa", "ecdh"] }
+rsa = { version = "0.9", features = ["sha2"] }
+ml-kem = { version = "0.2", features = ["deterministic"] }
+pbkdf2 = "0.12"
+scrypt = { version = "0.11", default-features = false }
+argon2 = "0.5"
+rand = "0.8"
+
+[features]
+# scripts/speed_vs_rust.py builds two binaries, each with a feature and
+# RUSTFLAGS cfgs:
+# soft: no CPU AES, PMULL/CLMUL, SHA or SIMD instructions, as in the Goose
+#   code (--cfg aes_force_soft, polyval_force_soft, chacha20_force_soft,
+#   curve25519_dalek_backend="serial").
+# hw: all of them. On x86 the crates find them at run time; on aarch64
+#   AES, PMULL and NEON need --cfg aes_armv8, polyval_armv8 and
+#   chacha20_force_neon, and SHA the asm feature.
+soft = ["sha1/force-soft", "sha2/force-soft"]
+hw = ["sha1/asm", "sha2/asm"]
+
+[profile.release]
+codegen-units = 1
+lto = true

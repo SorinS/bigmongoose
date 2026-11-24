@@ -101,16 +101,19 @@ fn ct_reduce(r: u32[:], x: const u32[:], m: const u32[:]) {
 fn ct_mul(r: u32[:], a: const u32[:], b: const u32[:]) {
     assert(r.len == a.len + b.len);
     for &x in r { x = 0; }
+    let n = b.len;
     for i in a.len {
         let ai: u64 = a[i];
+        let row = r[i..i + n + 1];               // a slice per row: no checks inside
+        assert(row.len == n + 1);
         var carry: u64 = 0;
-        for j in b.len {
+        for j in n {
             let bj: u64 = b[j];
-            let t = r[i + j] + ai * bj + carry;
-            r[i + j] = t as! u32;
+            let t = row[j] + ai * bj + carry;
+            row[j] = t as! u32;
             carry = t >> 32;
         }
-        r[i + b.len] = carry as! u32;
+        row[n] = carry as! u32;
     }
 }
 
@@ -134,6 +137,7 @@ fn mont_modexp(r: u32[:], x: const u32[:], e: const u32[:], m: const u32[:], m0i
     let tmp = buf[18 * n..19 * n];
     let one = buf[19 * n..20 * n];
     let t = buf[20 * n..];
+    assert(tab.len == 16 * n && acc.len == n && sel.len == n && tmp.len == n && one.len == n && n > 0);
     one[0] = 1;
     mont_mul(tab[..n], r2, one, m, m0i, t);              // R mod m, the Montgomery 1
     mont_mul(tab[n..2 * n], x, r2, m, m0i, t);           // x R

@@ -35,6 +35,7 @@ PUBLIC = {
     ("dsa", "dsa_sign_deterministic"): "z mod q: the digest is public",
     ("dsa", "dsa_verify"): "verification sees public values only",
     ("ec", "ec_hex"): "curve constants",
+    ("ec", "ecdsa_verify_digest"): "u1 = e/s and u2 = r/s: from the digest, the signature and the public key",
     ("ffdh", "ffdh_value_ok"): "the peer's public value and p",
     ("shamir", "prime_field_ok"): "the prime field's size is public (KMIP's Prime Field Size)",
     ("shamir", "split_prime_with"): "the prime and the number of parts",

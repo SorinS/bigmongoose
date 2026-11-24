@@ -170,8 +170,17 @@ is never negative. Limb products are taken in `u64`.
 | In place | `add_to` `sub_from` `add_i64_to` `mul_to` `mod_to` `mul_add_small_to` `div_small_to` |
 
 Multiplication is schoolbook below `KARATSUBA_MIN` (40) limbs and Karatsuba
-above it, with unbalanced operands split into chunks. Division is Knuth's
-Algorithm D.
+above it, with unbalanced operands split into chunks. Squaring (`sqr`, and
+`mul` of two equal values) computes each cross product once, about half
+the limb products, with Karatsuba's three half-size squarings above the
+threshold. Division is Knuth's Algorithm D. `modpow` slides a window of up
+to 6 bits over the exponent; with an odd modulus each step is a Montgomery
+product or square, with an even one a product and a division. `to_str` and
+`parse` split numbers above 40 limbs (1,600 digits) in halves at powers of
+10^9 (base^k in other bases). `parse` then costs Karatsuba products, below
+quadratic; `to_str` costs Algorithm D divisions, still quadratic but with
+multiply-adds where the chunk-by-chunk loop took a hardware division per
+limb per nine digits.
 
 **Goose specifics worth knowing:**
 
@@ -387,15 +396,24 @@ as RFC 7027 and RFC 8734 use them in TLS) with one generic
 implementation. `p224()`, `p256()`, `p384()`, `p521()`, `secp256k1()`,
 `bp256()`, `bp384()` and `bp512()` return a `Curve`
 holding the field prime, the group
-order, their Montgomery constants, the coefficients and the generator; build one and pass it
-to every call. Field elements are limbs of the curve's width in Montgomery
-form, multiplied by `bignum.mont`. Points are projective and added with
-the complete formulas of Renes, Costello and Batina: their algorithm 4
-for a = −3 (the NIST curves), algorithm 1 for any a (Brainpool's, three
-more multiplications per addition). Those have
-no exceptional cases, so doubling is just an addition and the point at
-infinity needs no branch. Scalar multiplication uses 4-bit windows across
-the whole scalar width and reads its table by scanning every entry.
+order, their Montgomery constants, the coefficients, the generator and
+three multiples of it for the comb below; build one and pass it to every
+call. Field elements are limbs of the curve's width in Montgomery form.
+Points are projective and added and doubled with the complete formulas of
+Renes, Costello and Batina: their algorithms 4 and 6 for a = −3 (the NIST
+curves), 1 and 3 for any a (Brainpool's and secp256k1's). Those have no
+exceptional cases, so the point at infinity needs no branch. Scalar
+multiplication and inversion run on fixed-size limb arrays, one copy of
+the code for each curve width, so the C compiler unrolls them; P-521
+reduces by folding at 2^521 instead of Montgomery's steps.
+
+- k·P (ECDH): 4-bit windows across the whole scalar width, the table read
+  by scanning every entry.
+- k·G (keys, signatures): a comb with four teeth over 2^d G, 2^2d G and
+  2^3d G (d a quarter of the width; `scripts/ec_comb_points.py` computes
+  them), a quarter of the doublings, the table again read by scanning.
+- u1·G + u2·Q (verification, public values): the comb interleaved with
+  sliding windows over u2, in variable time.
 
 | Group | Functions |
 |---|---|
@@ -628,60 +646,60 @@ is Goose / OpenSSL: above 1 is faster. `python3 scripts/speed_vs_openssl.py
 
 | Operation | Goose | OpenSSL 3.6.4 | Goose / OpenSSL |
 |---|---:|---:|---:|
-| md5 | 264.2 MB/s | 700.0 MB/s | 0.38 |
-| sha1 | 235.4 MB/s | 2,396.6 MB/s | 0.10 |
-| sha256 | 209.4 MB/s | 2,447.6 MB/s | 0.09 |
-| sha512 | 306.1 MB/s | 1,430.2 MB/s | 0.21 |
-| sha3-256 | 209.9 MB/s | 899.7 MB/s | 0.23 |
-| blake2b512 | 590.2 MB/s | 741.3 MB/s | 0.80 |
-| blake2s256 | 439.9 MB/s | 445.2 MB/s | 0.99 |
-| hmac-sha256 | 206.9 MB/s | 2,426.5 MB/s | 0.09 |
-| aes-128-gcm | 81.2 MB/s | 8,164.7 MB/s | 0.01 |
-| aes-256-gcm | 61.6 MB/s | 6,823.1 MB/s | 0.01 |
-| chacha20-poly1305 | 390.0 MB/s | 1,829.2 MB/s | 0.21 |
-| chacha20 | 530.2 MB/s | 2,517.4 MB/s | 0.21 |
-| aes-128-ctr | 91.6 MB/s | 12,958.7 MB/s | 0.01 |
-| aes-256-ctr | 67.2 MB/s | 9,474.9 MB/s | 0.01 |
-| aes-128-cbc | 48.2 MB/s | 1,597.8 MB/s | 0.03 |
-| aes-256-cbc | 34.9 MB/s | 1,132.8 MB/s | 0.03 |
-| aes-128-cfb | 47.9 MB/s | 1,099.5 MB/s | 0.04 |
-| aes-128-ofb | 48.5 MB/s | 1,054.6 MB/s | 0.05 |
-| des-cbc | 9.8 MB/s | 87.5 MB/s | 0.11 |
-| des-ede3-cbc | 3.3 MB/s | 33.4 MB/s | 0.10 |
-| rc4 | 1,061.4 MB/s | 1,293.4 MB/s | 0.82 |
-| x25519 | 11,389 op/s | 33,844 op/s | 0.34 |
-| ed25519-sign | 3,606 op/s | 33,389 op/s | 0.11 |
-| ed25519-verify | 3,681 op/s | 12,052 op/s | 0.31 |
-| ecdh-p224 | 1,245 op/s | 21,321 op/s | 0.06 |
-| ecdsa-p224-sign | 1,170 op/s | 30,208 op/s | 0.04 |
-| ecdsa-p224-verify | 613 op/s | 13,916 op/s | 0.04 |
-| ecdh-p256 | 927 op/s | 25,237 op/s | 0.04 |
-| ecdsa-p256-sign | 866 op/s | 58,872 op/s | 0.01 |
-| ecdsa-p256-verify | 462 op/s | 19,031 op/s | 0.02 |
-| ecdh-p384 | 305 op/s | 4,765 op/s | 0.06 |
-| ecdsa-p384-sign | 287 op/s | 7,142 op/s | 0.04 |
-| ecdsa-p384-verify | 153 op/s | 3,306 op/s | 0.05 |
-| ecdh-p521 | 132 op/s | 4,716 op/s | 0.03 |
-| ecdsa-p521-sign | 125 op/s | 4,790 op/s | 0.03 |
-| ecdsa-p521-verify | 65.9 op/s | 2,654.0 op/s | 0.02 |
-| rsa2048-sign | 125 op/s | 1,867 op/s | 0.07 |
-| rsa2048-verify | 5,883 op/s | 71,844 op/s | 0.08 |
-| rsa3072-sign | 43.5 op/s | 635.6 op/s | 0.07 |
-| rsa3072-verify | 2,880 op/s | 34,003 op/s | 0.08 |
-| rsa4096-sign | 18.1 op/s | 291.1 op/s | 0.06 |
-| rsa4096-verify | 1,659 op/s | 19,485 op/s | 0.09 |
-| mlkem512-keygen | 36,783 op/s | 46,565 op/s | 0.79 |
-| mlkem512-encaps | 33,543 op/s | 63,151 op/s | 0.53 |
-| mlkem512-decaps | 26,548 op/s | 40,118 op/s | 0.66 |
-| mlkem768-keygen | 24,576 op/s | 28,971 op/s | 0.85 |
-| mlkem768-encaps | 20,831 op/s | 43,862 op/s | 0.47 |
-| mlkem768-decaps | 16,864 op/s | 28,146 op/s | 0.60 |
-| mlkem1024-keygen | 15,822 op/s | 19,427 op/s | 0.81 |
-| mlkem1024-encaps | 13,932 op/s | 32,023 op/s | 0.44 |
-| mlkem1024-decaps | 11,510 op/s | 20,820 op/s | 0.55 |
-| pbkdf2-sha256-100k | 14.1 op/s | 87.2 op/s | 0.16 |
-| scrypt-n15-r8 | 17.5 op/s | 14.8 op/s | 1.18 |
-| argon2id-t1-64m-p4 | 33.3 op/s | 25.6 op/s | 1.30 |
+| md5 | 275.4 MB/s | 696.8 MB/s | 0.40 |
+| sha1 | 240.0 MB/s | 2,394.3 MB/s | 0.10 |
+| sha256 | 209.4 MB/s | 2,441.7 MB/s | 0.09 |
+| sha512 | 306.3 MB/s | 1,430.4 MB/s | 0.21 |
+| sha3-256 | 210.2 MB/s | 900.3 MB/s | 0.23 |
+| blake2b512 | 595.0 MB/s | 746.0 MB/s | 0.80 |
+| blake2s256 | 448.0 MB/s | 441.9 MB/s | 1.01 |
+| hmac-sha256 | 206.7 MB/s | 2,451.3 MB/s | 0.08 |
+| aes-128-gcm | 81.4 MB/s | 8,107.2 MB/s | 0.01 |
+| aes-256-gcm | 61.6 MB/s | 6,791.0 MB/s | 0.01 |
+| chacha20-poly1305 | 388.8 MB/s | 1,824.9 MB/s | 0.21 |
+| chacha20 | 520.5 MB/s | 2,523.0 MB/s | 0.21 |
+| aes-128-ctr | 88.8 MB/s | 12,823.0 MB/s | 0.01 |
+| aes-256-ctr | 67.2 MB/s | 9,513.4 MB/s | 0.01 |
+| aes-128-cbc | 48.2 MB/s | 1,594.9 MB/s | 0.03 |
+| aes-256-cbc | 34.9 MB/s | 1,128.9 MB/s | 0.03 |
+| aes-128-cfb | 47.8 MB/s | 1,105.4 MB/s | 0.04 |
+| aes-128-ofb | 48.6 MB/s | 1,178.5 MB/s | 0.04 |
+| des-cbc | 9.7 MB/s | 87.4 MB/s | 0.11 |
+| des-ede3-cbc | 3.3 MB/s | 33.5 MB/s | 0.10 |
+| rc4 | 1,063.0 MB/s | 1,281.6 MB/s | 0.83 |
+| x25519 | 11,347 op/s | 33,683 op/s | 0.34 |
+| ed25519-sign | 3,626 op/s | 33,561 op/s | 0.11 |
+| ed25519-verify | 3,389 op/s | 11,904 op/s | 0.28 |
+| ecdh-p224 | 3,634 op/s | 21,369 op/s | 0.17 |
+| ecdsa-p224-sign | 6,394 op/s | 30,325 op/s | 0.21 |
+| ecdsa-p224-verify | 2,962 op/s | 13,828 op/s | 0.21 |
+| ecdh-p256 | 2,666 op/s | 25,301 op/s | 0.11 |
+| ecdsa-p256-sign | 4,788 op/s | 59,173 op/s | 0.08 |
+| ecdsa-p256-verify | 2,201 op/s | 19,034 op/s | 0.12 |
+| ecdh-p384 | 835 op/s | 4,765 op/s | 0.18 |
+| ecdsa-p384-sign | 1,626 op/s | 7,217 op/s | 0.23 |
+| ecdsa-p384-verify | 699 op/s | 3,319 op/s | 0.21 |
+| ecdh-p521 | 406 op/s | 4,725 op/s | 0.09 |
+| ecdsa-p521-sign | 729 op/s | 4,799 op/s | 0.15 |
+| ecdsa-p521-verify | 333 op/s | 2,658 op/s | 0.13 |
+| rsa2048-sign | 113 op/s | 1,856 op/s | 0.06 |
+| rsa2048-verify | 7,479 op/s | 72,060 op/s | 0.10 |
+| rsa3072-sign | 39.9 op/s | 637.6 op/s | 0.06 |
+| rsa3072-verify | 3,139 op/s | 33,629 op/s | 0.09 |
+| rsa4096-sign | 16.7 op/s | 290.1 op/s | 0.06 |
+| rsa4096-verify | 1,753 op/s | 19,562 op/s | 0.09 |
+| mlkem512-keygen | 39,705 op/s | 46,748 op/s | 0.85 |
+| mlkem512-encaps | 33,467 op/s | 63,322 op/s | 0.53 |
+| mlkem512-decaps | 26,525 op/s | 39,648 op/s | 0.67 |
+| mlkem768-keygen | 24,578 op/s | 28,965 op/s | 0.85 |
+| mlkem768-encaps | 20,870 op/s | 44,222 op/s | 0.47 |
+| mlkem768-decaps | 16,854 op/s | 27,930 op/s | 0.60 |
+| mlkem1024-keygen | 15,768 op/s | 19,476 op/s | 0.81 |
+| mlkem1024-encaps | 13,934 op/s | 27,766 op/s | 0.50 |
+| mlkem1024-decaps | 11,510 op/s | 20,919 op/s | 0.55 |
+| pbkdf2-sha256-100k | 14.1 op/s | 90.1 op/s | 0.16 |
+| scrypt-n15-r8 | 17.3 op/s | 14.7 op/s | 1.18 |
+| argon2id-t1-64m-p4 | 32.6 op/s | 25.1 op/s | 1.30 |
 
 Where OpenSSL is far ahead it is mostly hardware: on this CPU it uses the
 AES, PMULL (GHASH) and SHA-1/SHA-2/SHA-3 instructions, and 64-bit-limb
@@ -693,14 +711,169 @@ rebuild each time. Where neither side has special instructions (BLAKE2,
 RC4, scrypt, Argon2) the two are even or Goose is ahead. RSA-2048 key
 generation takes about 0.27 s on average (ten runs, in constant time).
 
+Against Rust, on the same machine: `python3 scripts/speed_vs_rust.py
+[prefix]` builds `tools/rustbench`, the same operations on the same inputs
+with the RustCrypto crates (dalek for X25519 and Ed25519; Rust 1.98.1,
+release, LTO), twice. The first build has the CPU's crypto instructions
+turned off (`aes_force_soft` and the like), as the Goose code has none; it
+is the comparison of compiled code with compiled code. The second has
+them all on. On Apple silicon these crate versions use AES, PMULL, NEON
+and the SHA-2 instructions only when asked (`--cfg aes_armv8` and the
+like; the script asks), so a plain `cargo build` gets about the first
+column there. On x86 they find AES-NI, CLMUL and SHA-NI at run time.
+
+| Operation | Goose | Rust, software | Rust, CPU instructions | Goose / software | Goose / CPU |
+|---|---:|---:|---:|---:|---:|
+| md5 | 274.2 MB/s | 628.7 MB/s | 630.6 MB/s | 0.44 | 0.43 |
+| sha1 | 236.1 MB/s | 989.3 MB/s | 989.2 MB/s | 0.24 | 0.24 |
+| sha256 | 209.3 MB/s | 354.2 MB/s | 2,180.3 MB/s | 0.59 | 0.10 |
+| sha512 | 303.7 MB/s | 554.1 MB/s | 1,434.6 MB/s | 0.55 | 0.21 |
+| sha3-256 | 209.9 MB/s | 614.7 MB/s | 615.0 MB/s | 0.34 | 0.34 |
+| blake2b512 | 594.9 MB/s | 1,042.9 MB/s | 1,066.6 MB/s | 0.57 | 0.56 |
+| blake2s256 | 448.9 MB/s | 623.9 MB/s | 633.0 MB/s | 0.72 | 0.71 |
+| hmac-sha256 | 206.2 MB/s | 343.3 MB/s | 2,089.6 MB/s | 0.60 | 0.10 |
+| aes-128-gcm | 81.4 MB/s | 174.7 MB/s | 1,922.7 MB/s | 0.47 | 0.04 |
+| aes-256-gcm | 61.5 MB/s | 140.4 MB/s | 1,837.8 MB/s | 0.44 | 0.03 |
+| chacha20-poly1305 | 389.8 MB/s | 459.1 MB/s | 679.5 MB/s | 0.85 | 0.57 |
+| chacha20 | 529.1 MB/s | 675.4 MB/s | 1,260.1 MB/s | 0.78 | 0.42 |
+| aes-128-ctr | 91.6 MB/s | 249.7 MB/s | 8,427.0 MB/s | 0.37 | 0.01 |
+| aes-256-ctr | 67.2 MB/s | 186.1 MB/s | 6,604.9 MB/s | 0.36 | 0.01 |
+| aes-128-cbc | 48.3 MB/s | 60.9 MB/s | 1,404.8 MB/s | 0.79 | 0.03 |
+| aes-256-cbc | 34.8 MB/s | 46.5 MB/s | 900.9 MB/s | 0.75 | 0.04 |
+| aes-128-cfb | 48.0 MB/s | 62.0 MB/s | 1,507.8 MB/s | 0.77 | 0.03 |
+| aes-128-ofb | 48.4 MB/s | 61.6 MB/s | 1,414.0 MB/s | 0.79 | 0.03 |
+| des-cbc | 9.8 MB/s | 19.5 MB/s | 19.6 MB/s | 0.50 | 0.50 |
+| des-ede3-cbc | 3.3 MB/s | 5.2 MB/s | 6.6 MB/s | 0.63 | 0.50 |
+| rc4 | 1,056.0 MB/s | 1,051.8 MB/s | 1,061.5 MB/s | 1.00 | 0.99 |
+| x25519 | 11,262 op/s | 26,366 op/s | 25,444 op/s | 0.43 | 0.44 |
+| ed25519-sign | 3,641 op/s | 78,189 op/s | 80,684 op/s | 0.05 | 0.05 |
+| ed25519-verify | 3,707 op/s | 31,163 op/s | 32,378 op/s | 0.12 | 0.11 |
+| ecdh-p224 | 3,640 op/s | 7,520 op/s | 7,527 op/s | 0.48 | 0.48 |
+| ecdsa-p224-sign | 6,378 op/s | 6,611 op/s | 6,847 op/s | 0.96 | 0.93 |
+| ecdsa-p224-verify | 2,975 op/s | 3,672 op/s | 3,626 op/s | 0.81 | 0.82 |
+| ecdh-p256 | 2,657 op/s | 9,692 op/s | 9,681 op/s | 0.27 | 0.27 |
+| ecdsa-p256-sign | 4,792 op/s | 7,923 op/s | 7,981 op/s | 0.60 | 0.60 |
+| ecdsa-p256-verify | 2,197 op/s | 4,842 op/s | 4,865 op/s | 0.45 | 0.45 |
+| ecdh-p384 | 820 op/s | 2,559 op/s | 2,564 op/s | 0.32 | 0.32 |
+| ecdsa-p384-sign | 1,616 op/s | 2,326 op/s | 2,356 op/s | 0.69 | 0.69 |
+| ecdsa-p384-verify | 699 op/s | 1,278 op/s | 1,278 op/s | 0.55 | 0.55 |
+| ecdh-p521 | 406 op/s | 2,118 op/s | 2,174 op/s | 0.19 | 0.19 |
+| ecdsa-p521-sign | 729 op/s | 1,552 op/s | 1,552 op/s | 0.47 | 0.47 |
+| ecdsa-p521-verify | 332 op/s | 1,028 op/s | 1,028 op/s | 0.32 | 0.32 |
+| rsa2048-sign | 113 op/s | 723 op/s | 722 op/s | 0.16 | 0.16 |
+| rsa2048-verify | 7,503 op/s | 7,347 op/s | 7,194 op/s | 1.02 | 1.04 |
+| rsa3072-sign | 39.9 op/s | 261.2 op/s | 258.5 op/s | 0.15 | 0.15 |
+| rsa3072-verify | 3,142 op/s | 3,474 op/s | 3,407 op/s | 0.90 | 0.92 |
+| rsa4096-sign | 16.7 op/s | 118.7 op/s | 118.7 op/s | 0.14 | 0.14 |
+| rsa4096-verify | 1,755 op/s | 1,992 op/s | 1,965 op/s | 0.88 | 0.89 |
+| mlkem512-keygen | 36,541 op/s | 52,852 op/s | 63,811 op/s | 0.69 | 0.57 |
+| mlkem512-encaps | 33,558 op/s | 58,416 op/s | 59,304 op/s | 0.57 | 0.57 |
+| mlkem512-decaps | 26,537 op/s | 45,983 op/s | 45,919 op/s | 0.58 | 0.58 |
+| mlkem768-keygen | 24,473 op/s | 37,768 op/s | 37,741 op/s | 0.65 | 0.65 |
+| mlkem768-encaps | 20,853 op/s | 36,094 op/s | 36,165 op/s | 0.58 | 0.58 |
+| mlkem768-decaps | 16,867 op/s | 28,816 op/s | 28,845 op/s | 0.59 | 0.58 |
+| mlkem1024-keygen | 15,743 op/s | 24,348 op/s | 24,378 op/s | 0.65 | 0.65 |
+| mlkem1024-encaps | 13,954 op/s | 24,003 op/s | 23,789 op/s | 0.58 | 0.59 |
+| mlkem1024-decaps | 11,498 op/s | 19,696 op/s | 19,666 op/s | 0.58 | 0.58 |
+| pbkdf2-sha256-100k | 14.1 op/s | 26.8 op/s | 132.0 op/s | 0.53 | 0.11 |
+| scrypt-n15-r8 | 17.3 op/s | 17.1 op/s | 17.4 op/s | 1.01 | 1.00 |
+| argon2id-t1-64m-p4 | 33.1 op/s | 35.4 op/s | 35.5 op/s | 0.93 | 0.93 |
+
+Without the CPU's instructions on either side, the hashes, ciphers and
+ML-KEM run at 0.25 to 0.85 of Rust's speed, and RC4, scrypt and Argon2
+level with it. ECDSA signing runs at 0.45 to 0.95 (P-224 is level), its
+verification at 0.3 to 0.8 and ECDH at 0.2 to 0.5: the curves run
+fixed-width code for each size, with complete doubling formulas, a comb
+over precomputed multiples of G for keys and signatures, the comb and
+sliding windows together for verification, and for P-521 a reduction
+by folding at 2^521. What is left is mostly the limb width: Rust's curve
+and RSA code multiplies 64-bit limbs into 128-bit products, a quarter of
+the multiplications of 32-bit limbs, and Goose has no 64x64->128
+multiply (a P-256 field multiplication on 64-bit limbs measured 2.9
+times faster with one). dalek also signs Ed25519 from a precomputed
+table of base-point multiples, where `ed25519_sign` here runs two
+general scalar multiplications (one recomputes the public key). RSA
+verification, with its short exponent, is level. The `rsa` crate's
+private-key operation is blinded but not constant-time
+(RUSTSEC-2023-0071); the one here is both.
+
+Against Rust: BigInt. `python3 scripts/bigint_vs_rust.py [prefix]` runs
+`examples/bigint_speed.goose` and `tools/rustbigbench` on the same numbers:
+num-bigint 0.4.8 for the general integers, crypto-bigint 0.5.5 for the
+constant-time Montgomery exponentiation (`mont-modexp`, against its
+`DynResidue::pow`). A name's number is the operands' size in bits;
+`divmod` divides twice that by it, and `modpow` raises a number below the
+modulus to an exponent as long as it.
+
+| Operation | Goose | Rust (num-bigint / crypto-bigint) | Goose / Rust |
+|---|---:|---:|---:|
+| add-256 | 29,571,042 op/s | 12,119,285 op/s | 2.44 |
+| sub-256 | 31,077,336 op/s | 27,010,260 op/s | 1.15 |
+| mul-256 | 7,203,596 op/s | 17,170,244 op/s | 0.42 |
+| sqr-256 | 8,651,434 op/s | 17,160,164 op/s | 0.50 |
+| shl-256 | 32,302,724 op/s | 14,516,297 op/s | 2.23 |
+| shr-256 | 30,699,128 op/s | 17,900,610 op/s | 1.71 |
+| divmod-256 | 5,052,588 op/s | 5,868,958 op/s | 0.86 |
+| add-1024 | 28,156,152 op/s | 12,047,405 op/s | 2.34 |
+| sub-1024 | 26,024,570 op/s | 22,320,404 op/s | 1.17 |
+| mul-1024 | 766,304 op/s | 3,705,602 op/s | 0.21 |
+| sqr-1024 | 1,337,920 op/s | 3,708,044 op/s | 0.36 |
+| shl-1024 | 28,514,866 op/s | 14,320,645 op/s | 1.99 |
+| shr-1024 | 28,268,520 op/s | 16,783,083 op/s | 1.68 |
+| divmod-1024 | 620,420 op/s | 1,230,568 op/s | 0.50 |
+| add-4096 | 8,527,052 op/s | 5,930,239 op/s | 1.44 |
+| sub-4096 | 8,177,802 op/s | 10,932,339 op/s | 0.75 |
+| mul-4096 | 84,706 op/s | 323,999 op/s | 0.26 |
+| sqr-4096 | 134,386 op/s | 324,794 op/s | 0.41 |
+| shl-4096 | 12,852,570 op/s | 8,429,202 op/s | 1.52 |
+| shr-4096 | 10,960,422 op/s | 15,231,305 op/s | 0.72 |
+| divmod-4096 | 44,536 op/s | 133,568 op/s | 0.33 |
+| add-16384 | 2,094,886 op/s | 2,236,213 op/s | 0.94 |
+| sub-16384 | 2,067,546 op/s | 4,290,679 op/s | 0.48 |
+| mul-16384 | 8,890 op/s | 31,563 op/s | 0.28 |
+| sqr-16384 | 14,055 op/s | 31,197 op/s | 0.45 |
+| shl-16384 | 3,593,312 op/s | 5,385,064 op/s | 0.67 |
+| shr-16384 | 3,313,558 op/s | 7,539,777 op/s | 0.44 |
+| divmod-16384 | 2,886 op/s | 14,218 op/s | 0.20 |
+| add-65536 | 519,238 op/s | 618,275 op/s | 0.84 |
+| sub-65536 | 515,830 op/s | 1,242,723 op/s | 0.42 |
+| mul-65536 | 967 op/s | 3,961 op/s | 0.24 |
+| sqr-65536 | 1,525 op/s | 3,937 op/s | 0.39 |
+| shl-65536 | 937,008 op/s | 1,996,277 op/s | 0.47 |
+| shr-65536 | 847,836 op/s | 2,782,970 op/s | 0.30 |
+| modpow-1024 | 452 op/s | 2,032 op/s | 0.22 |
+| gcd-1024 | 73,537 op/s | 66,559 op/s | 1.10 |
+| modinv-1024 | 21,615 op/s | 22,398 op/s | 0.97 |
+| modpow-2048 | 61.1 op/s | 283 op/s | 0.22 |
+| mont-modexp-2048 | 45.4 op/s | 254 op/s | 0.18 |
+| modpow-4096 | 7.2 op/s | 38.2 op/s | 0.19 |
+| mont-modexp-4096 | 4.5 op/s | 30.7 op/s | 0.15 |
+| gcd-4096 | 2,650 op/s | 8,746 op/s | 0.30 |
+| modinv-4096 | 662 op/s | 1,170 op/s | 0.57 |
+| to_str-4096 | 48,179 op/s | 86,172 op/s | 0.56 |
+| parse-4096 | 99,418 op/s | 349,777 op/s | 0.28 |
+| to_str-65536 | 317 op/s | 1,447 op/s | 0.22 |
+| parse-65536 | 792 op/s | 2,799 op/s | 0.28 |
+
+Addition, subtraction and shifts of short numbers are ahead or even.
+Multiplication is at 0.2 to 0.35 of num-bigint and squaring at 0.35 to 0.5:
+num-bigint's limbs are 64 bits with 128-bit products, a quarter of the
+limb multiplications, and Goose has no 64x64->128 multiply to match it.
+`modpow` (about 0.2) is Montgomery with a sliding window like
+num-bigint's, so what is left is mostly the limb width; `mont_modexp`
+(0.15 to 0.18) is the same, constant time. Division (0.2 to 0.9) is
+Algorithm D on both sides. `to_str` and `parse` of a 65536-bit number
+(0.22, 0.28) split at powers of 10^9 here; before that they were
+chunk-by-chunk and quadratic (0.08, 0.13).
+
 ### Caveats
 
 - A C compiler can turn mask arithmetic back into branches, so check the
   assembly of anything that matters; `scripts/ct_timing.py` measures the
   code as built.
-- The P-256/P-384 code is generic over the prime. On the same machine,
-  OpenSSL's ECDH (specialized, with assembly) is 27 times faster on P-256
-  and 15 times faster on P-384.
+- The curve code is generic over the prime except for P-521's
+  reduction. On the same machine OpenSSL's ECDH (specialized, with
+  assembly) is 9.5 times faster on P-256 and 5.7 times on P-384.
 - Compressed points are read on every curve but P-224 (P-224's
   square root would need Tonelli-Shanks). TLS 1.3 sends only uncompressed
   points; krb5's SPAKE sends compressed ones.
@@ -982,6 +1155,10 @@ In `examples/`, run from the repository's top as `goose examples/<name>.goose`
 - `nacl_demo.goose`: NaCl secretbox, box, sealed boxes, sign and auth.
 - `constant_time.goose`: the `ct` masks, select, swap and compare, Montgomery modexp and inverse.
 - `speed.goose`: every primitive's throughput or rate, one line
-  each; `scripts/speed_vs_openssl.py` sets it against openssl.
+  each; `scripts/speed_vs_openssl.py` sets it against openssl, and
+  `scripts/speed_vs_rust.py` against Rust's crates (`tools/rustbench`).
+- `bigint_speed.goose`: the rate of each BigInt operation by size, and of
+  `mont_modexp`; `scripts/bigint_vs_rust.py` sets it against Rust's
+  num-bigint and crypto-bigint (`tools/rustbigbench`).
 - `bench.goose`: schoolbook vs Karatsuba by size, 10000!, 2048-bit
   modpow.

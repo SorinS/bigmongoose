@@ -84,7 +84,10 @@ def openssl_figures(want):
     if want("scrypt"):
         got["scrypt-n15-r8"] = rate(lambda: hashlib.scrypt(b"password", salt=b"saltsaltsaltsalt", n=1 << 15, r=8,
                                                            p=1, maxmem=1 << 26, dklen=32))
-    if want("argon2"):
+    # Argon2 needs OpenSSL 3.2 or later; older ones get no figure.
+    has_argon2 = subprocess.run(["openssl", "kdf", "-keylen", "32", "-kdfopt", "pass:p", "-kdfopt", "salt:saltsalt",
+                                 "-kdfopt", "memcost:32", "ARGON2ID"], capture_output=True).returncode == 0
+    if want("argon2") and has_argon2:
         # The command's start-up, timed on an 8 KiB run, is taken off.
         def kdf(m):
             return lambda: subprocess.run(["openssl", "kdf", "-keylen", "32", "-kdfopt", "pass:password",

@@ -1,0 +1,17 @@
+[package]
+name = "rustbigbench"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# examples/bigint_speed.goose's measurements with num-bigint (the general
+# integers) and crypto-bigint (constant-time Montgomery exponentiation);
+# scripts/bigint_vs_rust.py builds and runs it.
+[dependencies]
+num-bigint = "0.4"
+num-integer = "0.1"
+crypto-bigint = "0.5"
+
+[profile.release]
+codegen-units = 1
+lto = true

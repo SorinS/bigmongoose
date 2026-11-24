@@ -35,6 +35,7 @@
 namespace bignum;
 
 import std;
+import mont;
 
 struct BigInt { neg: bool, mag: u32[>..] }
 
@@ -118,19 +119,63 @@ fn sub_into(r: u32[:], a: const u32[:]) -> u64 {
     return borrow;
 }
 
-// r = a * b, r.len == a.len + b.len.
+// r = a * b, r.len == a.len + b.len. Each row works on its own slice of r,
+// so the inner loop's indices need no checks.
 fn mul_school(r: u32[:], a: const u32[:], b: const u32[:]) {
     for &x in r { x = 0; }
+    let n = b.len;
     for i in a.len {
         let ai: u64 = a[i];
         if ai == 0 { continue; }
+        let row = r[i..i + n + 1];
+        assert(row.len == n + 1);
         var carry: u64 = 0;
-        for j in b.len {
-            let t = r[i + j] + ai * b[j] + carry;
-            r[i + j] = t as! u32;
+        for j in n {
+            let t = row[j] + ai * b[j] + carry;
+            row[j] = t as! u32;
             carry = t >> 32;
         }
-        r[i + b.len] = carry as! u32;
+        row[n] = carry as! u32;
+    }
+}
+
+// r = a * a, r.len == 2 a.len: each cross product a[i] a[j] (i < j) once,
+// the sum doubled, then the squares a[i]^2 added on the diagonal. About
+// half the limb products of mul_school, which is faster below 6 limbs.
+fn sqr_school(r: u32[:], a: const u32[:]) {
+    if a.len < 6 { mul_school(r, a, a); return; }
+    for &x in r { x = 0; }
+    let n = a.len;
+    for i in n {
+        let ai: u64 = a[i];
+        let rest = a[i + 1..];
+        if ai == 0 || rest.len == 0 { continue; }
+        let row = r[2 * i + 1..i + n + 1];       // r[i + j] for j > i, and the carry
+        assert(row.len == rest.len + 1);
+        var carry: u64 = 0;
+        for k in rest.len {
+            let t = row[k] + ai * rest[k] + carry;
+            row[k] = t as! u32;
+            carry = t >> 32;
+        }
+        row[rest.len] = carry as! u32;
+    }
+    var hi: u32 = 0;
+    for &x in r {
+        let v = x;
+        x = (v << 1) | hi;
+        hi = v >> 31;
+    }
+    var c: u64 = 0;
+    for i in n {
+        let ai: u64 = a[i];
+        let sq = ai * ai;
+        let d = r[2 * i..2 * i + 2];
+        let lo = d[0] + (sq & MASK32) + c;
+        d[0] = lo as! u32;
+        let h = d[1] + (sq >> 32) + (lo >> 32);
+        d[1] = h as! u32;
+        c = h >> 32;
     }
 }
 
@@ -180,6 +225,45 @@ recursive fn mul_kara(r: u32[:], a: const u32[:], b: const u32[:], scratch: u32[
     let room = r.len - h;
     add_into(r[h..], t[..::min(t.len, room)]);
     scratch.resize(mark);
+}
+
+// r = a * a, r.len == 2 a.len, by Karatsuba's identity for squares:
+// (a1 B^h + a0)^2 = z2 B^2h + ((a0 + a1)^2 - z0 - z2) B^h + z0, with three
+// half-size squarings.
+recursive fn sqr_kara(r: u32[:], a: const u32[:], scratch: u32[>..<]&) {
+    if a.len < KARATSUBA_MIN { sqr_school(r, a); return; }
+    let mark = scratch.len;
+    let h = a.len / 2;
+    let a0 = a[..h];
+    let a1 = a[h..];
+    sqr_kara(r[..2 * h], a0, scratch);                   // z0
+    sqr_kara(r[2 * h..], a1, scratch);                   // z2
+    let la = a1.len + 1;
+    for i in 3 * la { scratch.push(0); }
+    let sa = scratch[mark..mark + la];
+    let t = scratch[mark + la..];
+    copy_into(sa[..a1.len], a1);
+    add_into(sa, a0);
+    sqr_kara(t, sa, scratch);                            // (a0 + a1)^2
+    sub_into(t, r[..2 * h]);
+    sub_into(t, r[2 * h..]);                             // z1, which fits r[h..]
+    let room = r.len - h;
+    add_into(r[h..], t[..::min(t.len, room)]);
+    scratch.resize(mark);
+}
+
+// out = a * a
+fn mag_sqr(out: u32[>..]&, a: const u32[:]) {
+    out.clear();
+    if a.len == 0 { return; }
+    out.resize(2 * a.len, 0);
+    if a.len < KARATSUBA_MIN {
+        sqr_school(out, a);
+    } else {
+        var scratch: u32[>..<] = [];
+        sqr_kara(out, a, scratch);
+    }
+    mag_trim(out);
 }
 
 // out = a * b
@@ -294,31 +378,35 @@ fn mag_divmod(q: u32[>..]&, r: u32[>..]&, a: const u32[:], b: const u32[:]) {
             rhat += vt;
             if rhat >= BASE { break; }
         }
-        // un[j..j + n + 1] -= qhat * vn
+        // u -= qhat * v, over u = un[j..j + n + 1] (slices, so the inner
+        // loops' indices need no checks)
+        let u = un[j..j + n + 1];
+        let v = vn[..n];
+        assert(u.len == n + 1 && v.len == n);
         var borrow: u64 = 0;
         var carry: u64 = 0;
         for i in n {
-            let p = qhat * vn[i] + carry;
+            let p = qhat * v[i] + carry;
             carry = p >> 32;
-            let ui: u64 = un[i + j];
+            let ui: u64 = u[i];
             let t = ui - (p & MASK32) - borrow;
-            un[i + j] = t as! u32;
+            u[i] = t as! u32;
             borrow = t >> 63;
         }
-        let top: u64 = un[j + n];
+        let top: u64 = u[n];
         let t = top - carry - borrow;
-        un[j + n] = t as! u32;
+        u[n] = t as! u32;
         if t >> 63 != 0 {
             // qhat was one too large: add the divisor back.
             qhat--;
             var c: u64 = 0;
             for i in n {
-                let ui: u64 = un[i + j];
-                let s2 = ui + vn[i] + c;      // in u64: u32 + u32 would drop the carry
-                un[i + j] = s2 as! u32;
+                let ui: u64 = u[i];
+                let s2 = ui + v[i] + c;       // in u64: u32 + u32 would drop the carry
+                u[i] = s2 as! u32;
                 c = s2 >> 32;
             }
-            un[j + n] = (un[j + n] + c) as! u32;
+            u[n] = (u[n] + c) as! u32;
         }
         q[j] = qhat as! u32;
     }
@@ -497,14 +585,20 @@ fn sub(a, b) -> BigInt {
     return r;
 }
 
+// Equal magnitudes (mul(x, x), or two equal values) take the squaring,
+// found by a comparison that usually stops at the first limb.
 fn mul(a, b) -> BigInt {
     var r = zero();
-    mag_mul(r.mag, a.mag, b.mag);
+    if a.mag == b.mag { mag_sqr(r.mag, a.mag); } else { mag_mul(r.mag, a.mag, b.mag); }
     r.neg = r.mag.len > 0 && a.neg != b.neg;
     return r;
 }
 
-fn sqr(a) -> BigInt { mul(a, a) }
+fn sqr(a) -> BigInt {
+    var r = zero();
+    mag_sqr(r.mag, a.mag);
+    return r;
+}
 
 // Truncating division: the quotient rounds toward zero and the remainder
 // has the dividend's sign, as in C. Aborts when b is zero.
@@ -777,8 +871,180 @@ fn mod_to(x: BigInt&, m) {
     x.neg = r.neg;
 }
 
-// b^e mod m, for e >= 0 and m > 0; in [0, m). Variable-time.
+// The left-to-right sliding-window schedule of e (e > 0) for windows of
+// up to w bits: pairs of the squarings to do and then the odd window
+// value to multiply by (0: squarings only, at the end). The first pair's
+// squarings are of 1, so its value starts the result instead.
+fn window_steps(steps: i64[>..]&, e: const u32[:], bits: i64, w: i64) {
+    steps.clear();
+    var i = bits - 1;
+    var pending = 0;
+    while i >= 0 {
+        if (e[i / 32] >> (i % 32)) & 1 == 0 { pending++; i--; continue; }
+        var j = ::max(i - w + 1, 0);
+        while (e[j / 32] >> (j % 32)) & 1 == 0 { j++; }
+        var v = 0;
+        var k = i;
+        while k >= j { v = 2 * v + ((e[k / 32] >> (k % 32)) & 1); k--; }
+        steps.push(pending + i - j + 1);
+        steps.push(v);
+        pending = 0;
+        i = j - 1;
+    }
+    if pending > 0 { steps.push(pending); steps.push(0); }
+}
+
+// The window width for an exponent of `bits` bits: a table of 2^(w-1) odd
+// powers, against the multiplications it saves.
+fn window_bits(bits: i64) -> i64 {
+    if bits <= 32 { 1 } else if bits <= 256 { 4 } else if bits <= 1024 { 5 } else { 6 }
+}
+
+// r = t / R mod m for odd m and t < m R, R = 2^(32 m.len); t has 2 m.len
+// limbs and is overwritten. Montgomery reduction, a row of m per limb.
+fn redc(r: u32[:], t: u32[:], m: const u32[:], m0i: u32) {
+    let n = m.len;
+    assert(t.len == 2 * n && r.len == n);
+    var extra: u64 = 0;
+    for i in n {
+        let row = t[i..i + n + 1];
+        assert(row.len == n + 1);
+        let mi: u64 = row[0] * m0i;
+        var c: u64 = 0;
+        for j in n {
+            let s = row[j] + mi * m[j] + c;
+            row[j] = s as! u32;
+            c = s >> 32;
+        }
+        let s = row[n] + c + extra;
+        row[n] = s as! u32;
+        extra = s >> 32;
+    }
+    // t[n..] + extra R is below 2m: subtract m once if it is m or more.
+    let hi = t[n..];
+    var ge = extra != 0;
+    if !ge {
+        ge = true;
+        var k = n;
+        while k > 0 {
+            k--;
+            if hi[k] != m[k] { ge = hi[k] > m[k]; break; }
+        }
+    }
+    if ge { sub_into(hi, m); }
+    copy_into(r, hi);
+}
+
+// r = a b / R mod m (r apart from a and b), through t (2 m.len limbs).
+fn mont_mul_v(r: u32[:], a: const u32[:], b: const u32[:], m: const u32[:], m0i: u32,
+              t: u32[:], scratch: u32[>..<]&) {
+    if m.len < KARATSUBA_MIN { mul_school(t, a, b); } else { mul_kara(t, a, b, scratch); }
+    redc(r, t, m, m0i);
+}
+
+fn mont_sqr_v(r: u32[:], a: const u32[:], m: const u32[:], m0i: u32, t: u32[:], scratch: u32[>..<]&) {
+    if m.len < KARATSUBA_MIN { sqr_school(t, a); } else { sqr_kara(t, a, scratch); }
+    redc(r, t, m, m0i);
+}
+
+// b^e mod m for odd m > 1, 0 <= b < m and e > 0: the sliding window over
+// Montgomery products, a square costing about half a product.
+fn modpow_odd(b, e, m) -> BigInt {
+    let n = m.mag.len;
+    let m0i = mont_m0i(m.mag[0]);
+    let bits = bit_len(e);
+    let w = window_bits(bits);
+    let odd = 1 << (w - 1);
+    var steps: i64[>..] = [];
+    window_steps(steps, e.mag, bits, w);
+    // tab[k] = b^(2k+1) R mod m; the buffer also holds the accumulator,
+    // a spare, the square of b and the double-width product.
+    var buf: u32[>..] = [];
+    buf.resize((odd + 5) * n, 0);
+    let tab = buf[..odd * n];
+    let acc = buf[odd * n..(odd + 1) * n];
+    let tmp = buf[(odd + 1) * n..(odd + 2) * n];
+    let b2 = buf[(odd + 2) * n..(odd + 3) * n];
+    let t = buf[(odd + 3) * n..];
+    var scratch: u32[>..<] = [];
+    let br = mod_floor(shl(b, 32 * n), m);              // b R mod m
+    copy_into(tab[..br.mag.len], br.mag);
+    mont_sqr_v(b2, tab[..n], m.mag, m0i, t, scratch);
+    for k in 1..odd {
+        mont_mul_v(tab[k * n..(k + 1) * n], tab[(k - 1) * n..k * n], b2, m.mag, m0i, t, scratch);
+    }
+    let v0 = steps[1];
+    copy_into(acc, tab[(v0 / 2) * n..(v0 / 2 + 1) * n]);
+    var s = 2;
+    while s < steps.len {
+        for q in steps[s] {
+            mont_sqr_v(tmp, acc, m.mag, m0i, t, scratch);
+            copy_into(acc, tmp);
+        }
+        let v = steps[s + 1];
+        if v != 0 {
+            mont_mul_v(tmp, acc, tab[(v / 2) * n..(v / 2 + 1) * n], m.mag, m0i, t, scratch);
+            copy_into(acc, tmp);
+        }
+        s += 2;
+    }
+    // Out of Montgomery form: acc / R.
+    for &x in t { x = 0; }
+    copy_into(t[..n], acc);
+    var r = zero();
+    r.mag.resize(n, 0);
+    redc(r.mag, t, m.mag, m0i);
+    mag_trim(r.mag);
+    return r;
+}
+
+// b^e mod m, for e >= 0 and m > 0; in [0, m). Variable-time: an odd
+// modulus takes Montgomery products with a sliding window, an even one
+// the same window over products and divisions.
 fn modpow(b, e, m) -> BigInt {
+    assert(!e.neg && m.mag.len > 0 && !m.neg);
+    if e.mag.len == 0 || (m.mag.len == 1 && m.mag[0] == 1) { return mod_floor(one(), m); }
+    let base = mod_floor(b, m);
+    if is_odd(m) { return modpow_odd(base, e, m); }
+    let bits = bit_len(e);
+    let w = window_bits(bits);
+    let odd = 1 << (w - 1);
+    let n = m.mag.len;
+    var steps: i64[>..] = [];
+    window_steps(steps, e.mag, bits, w);
+    // tab[k] = b^(2k+1) mod m, each in n limbs.
+    var tab: u32[>..] = [];
+    tab.resize(odd * n, 0);
+    copy_into(tab[..base.mag.len], base.mag);
+    var b2 = mul(base, base);
+    mod_to(b2, m);
+    var p = copy(base);
+    for k in 1..odd {
+        mul_to(p, b2);
+        mod_to(p, m);
+        copy_into(tab[k * n..k * n + p.mag.len], p.mag);
+    }
+    let v0 = steps[1];
+    var r = big_of(tab[(v0 / 2) * n..(v0 / 2 + 1) * n]);
+    var s = 2;
+    while s < steps.len {
+        for q in steps[s] {
+            mul_to(r, r);
+            mod_to(r, m);
+        }
+        let v = steps[s + 1];
+        if v != 0 {
+            mul_to(r, big_of(tab[(v / 2) * n..(v / 2 + 1) * n]));
+            mod_to(r, m);
+        }
+        s += 2;
+    }
+    return r;
+}
+
+// The bit-by-bit square-and-multiply that modpow replaced, kept as the
+// reference its tests compare with.
+fn modpow_simple(b, e, m) -> BigInt {
     assert(!e.neg && m.mag.len > 0 && !m.neg);
     var r = mod_floor(one(), m);
     let base = mod_floor(b, m);
@@ -885,6 +1151,81 @@ fn chunk_of(base: i64) -> i64, u64 {
     return k, p;
 }
 
+// Below these sizes text converts chunk by chunk, in quadratic time;
+// above them it splits in halves at powers of base^k (k digits to a
+// chunk), so the time is that of the multiplications and divisions.
+let TEXT_SPLIT_LIMBS: i64 = 40;
+let TEXT_SPLIT_DIGITS: i64 = 1600;
+
+// The powers pk^(2^i) of a chunk's base, flat in buf, the i-th starting
+// at at[i] and ending at at[i + 1], up to the first with more than
+// `limbs` limbs.
+fn chunk_powers(buf: u32[>..]&, at: i64[>..]&, pk: u64, limbs: i64) {
+    buf.clear();
+    at.clear();
+    at.push(0);
+    buf.push(pk as! u32);
+    at.push(1);
+    while at[at.len - 1] - at[at.len - 2] <= limbs {
+        var sq: u32[>..] = [];
+        mag_sqr(sq, buf[at[at.len - 2]..at[at.len - 1]]);
+        buf.append(sq);
+        at.push(buf.len);
+    }
+}
+
+// The value of digits, chunk by chunk, and false at a digit not of base.
+fn parse_small(r: u32[>..]&, digits: const u8[:], base: i64, k: i64) -> bool {
+    r.clear();
+    var i = 0;
+    while i < digits.len {
+        var chunk: u64 = 0;
+        var mult: u64 = 1;
+        var n = 0;
+        while n < k && i < digits.len {
+            let d = digit_value(digits[i]);
+            if d >= base { return false; }
+            chunk = chunk * (base as u64) + (d as u64);
+            mult = mult * (base as u64);
+            i++;
+            n++;
+        }
+        mag_mul_add_small(r, mult as! u32, chunk as! u32);
+    }
+    mag_trim(r);
+    return true;
+}
+
+// r = the value of digits: the high digits times pk^(2^L), plus the low
+// k 2^L digits, for the largest such split. The low part waits on
+// scratch while the high part is parsed. False at a digit not of base.
+recursive fn parse_rec(r: u32[>..]&, digits: const u8[:], base: i64, k: i64,
+                       pw: const u32[:], at: const i64[:], scratch: u32[>..<]&) -> bool {
+    if digits.len < TEXT_SPLIT_DIGITS { return parse_small(r, digits, base, k); }
+    var lv = 0;
+    while k << (lv + 1) < digits.len { lv++; }
+    let cut = digits.len - (k << lv);
+    let mark = scratch.len;
+    if !parse_rec(r, digits[cut..], base, k, pw, at, scratch) { return false; }
+    let nlo = r.len;
+    scratch.append(r);
+    if !parse_rec(r, digits[..cut], base, k, pw, at, scratch) { scratch.resize(mark); return false; }
+    let p = pw[at[lv]..at[lv + 1]];
+    let nprod = r.len + p.len;
+    for i in nprod { scratch.push(0); }
+    let lo = scratch[mark..mark + nlo];
+    let prod = scratch[mark + nlo..];
+    if r.len >= p.len { mul_kara(prod, r, p, scratch); } else { mul_kara(prod, p, r, scratch); }
+    r.clear();
+    r.append(prod);
+    if r.len < nlo { r.resize(nlo, 0); }
+    r.push(0);
+    add_into(r[..], lo);
+    mag_trim(r);
+    scratch.resize(mark);
+    return true;
+}
+
 // Parses an optional sign and the digits of s in base 2..36 (a "0x"
 // prefix is allowed in base 16), and whether s was well formed.
 fn parse(s: const u8[:], base: i64 = 10) -> BigInt, bool {
@@ -895,24 +1236,70 @@ fn parse(s: const u8[:], base: i64 = 10) -> BigInt, bool {
     if i < s.len && (s[i] == '-' || s[i] == '+') { negative = s[i] == '-'; i++; }
     if base == 16 && i + 1 < s.len && s[i] == '0' && (s[i + 1] == 'x' || s[i + 1] == 'X') { i += 2; }
     if i >= s.len { return r, false; }
+    let digits = s[i..];
     let k, pk = chunk_of(base);
-    while i < s.len {
-        var chunk: u64 = 0;
-        var mult: u64 = 1;
-        var n = 0;
-        while n < k && i < s.len {
-            let d = digit_value(s[i]);
-            if d >= base { return zero(), false; }
-            chunk = chunk * (base as u64) + (d as u64);
-            mult = mult * (base as u64);
-            i++;
-            n++;
-        }
-        mag_mul_add_small(r.mag, mult as! u32, chunk as! u32);
+    var ok = true;
+    if digits.len < TEXT_SPLIT_DIGITS {
+        ok = parse_small(r.mag, digits, base, k);
+    } else {
+        var pw: u32[>..] = [];
+        var at: i64[>..] = [];
+        chunk_powers(pw, at, pk, digits.len / k / 2 + 1);
+        var scratch: u32[>..<] = [];
+        ok = parse_rec(r.mag, digits, base, k, pw, at, scratch);
     }
-    mag_trim(r.mag);
+    if !ok { return zero(), false; }
     r.neg = negative && r.mag.len > 0;
     return r, true;
+}
+
+// Appends a's digits, chunk by chunk; with width > 0, exactly width
+// chunks (leading zeros), else without leading zeros (a > 0).
+fn format_small(out: u8[>..]&, a: const u32[:], base: i64, k: i64, pk: u64, width: i64) {
+    var work: u32[>..] = [];
+    work.append(a);
+    mag_trim(work);
+    var chunks: u32[>..] = [];
+    while work.len > 0 { chunks.push(mag_div_small_in(work, pk as! u32)); }
+    while chunks.len < width { chunks.push(0); }
+    var i = chunks.len;
+    while i > 0 {
+        i--;
+        let nd = if width == 0 && i == chunks.len - 1 { 0 } else { k };
+        format_uint(out, chunks[i], base, nd, '0');
+    }
+}
+
+// Appends a (> 0 when width is 0), split at pk^(2^L): the quotient's
+// digits, then the remainder's, padded to its 2^L chunks. With width > 0
+// (a power of two), a is below pk^width and fills exactly width chunks.
+// The quotient and remainder wait on scratch.
+recursive fn format_rec(out: u8[>..]&, a: const u32[:], base: i64, k: i64, pk: u64, width: i64,
+                        pw: const u32[:], at: const i64[:], scratch: u32[>..<]&) {
+    if a.len < TEXT_SPLIT_LIMBS || width == 1 { format_small(out, a, base, k, pk, width); return; }
+    var lv = 0;
+    if width > 0 {
+        while 2 << lv < width { lv++; }
+    } else {
+        while lv + 2 < at.len && 2 * (at[lv + 2] - at[lv + 1]) <= a.len + 1 { lv++; }
+    }
+    var top = a.len;
+    while top > 0 && a[top - 1] == 0 { top--; }
+    let mark = scratch.len;
+    var nq = 0;
+    {
+        var q: u32[>..] = [];
+        var r: u32[>..] = [];
+        mag_divmod(q, r, a[..top], pw[at[lv]..at[lv + 1]]);
+        nq = q.len;
+        scratch.append(q);
+        scratch.append(r);
+    }
+    let end = scratch.len;
+    let half = 1 << lv;
+    format_rec(out, scratch[mark..mark + nq], base, k, pk, if width > 0 { half } else { 0 }, pw, at, scratch);
+    format_rec(out, scratch[mark + nq..end], base, k, pk, half, pw, at, scratch);
+    scratch.resize(mark);
 }
 
 // Appends a in base 2..36, lowercase.
@@ -921,15 +1308,15 @@ fn format_base(out: u8[>..]&, a, base: i64) {
     if a.mag.len == 0 { out.push('0'); return; }
     if a.neg { out.push('-'); }
     let k, pk = chunk_of(base);
-    var work = copy(a.mag);
-    var chunks: u32[>..] = [];
-    while work.len > 0 { chunks.push(mag_div_small_in(work, pk as! u32)); }
-    var i = chunks.len - 1;
-    format_uint(out, chunks[i] as u64, base, 0, '0');
-    while i > 0 {
-        i--;
-        format_uint(out, chunks[i] as u64, base, k, '0');
+    if a.mag.len < TEXT_SPLIT_LIMBS {
+        format_small(out, a.mag, base, k, pk, 0);
+        return;
     }
+    var pw: u32[>..] = [];
+    var at: i64[>..] = [];
+    chunk_powers(pw, at, pk, a.mag.len / 2 + 1);
+    var scratch: u32[>..<] = [];
+    format_rec(out, a.mag, base, k, pk, 0, pw, at, scratch);
 }
 
 fn to_str(a, base: i64 = 10) -> u8[>..] {
